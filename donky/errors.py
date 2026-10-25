@@ -1,0 +1,2 @@
+class DonkyRuntimeError(Exception):
+    pass

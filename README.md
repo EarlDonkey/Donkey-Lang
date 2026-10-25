@@ -1,0 +1,1 @@
+Donky is a small statically-typed language with an interpreter and a bytecode compiler. It exists so I can learn how languages work.
