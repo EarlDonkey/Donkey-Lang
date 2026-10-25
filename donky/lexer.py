@@ -1,12 +1,13 @@
 from enum import Enum, auto
 from dataclasses import dataclass
 
+
 class TokenType(Enum):
-    # Literals
+    # literals
     NUMBER = auto()
     STRING = auto()
     IDENT = auto()
-    # Keywords
+    # keywords
     LET = auto()
     FN = auto()
     IF = auto()
@@ -16,18 +17,22 @@ class TokenType(Enum):
     PRINT = auto()
     TRUE = auto()
     FALSE = auto()
-    # Operators
+    # operators
     PLUS = auto()
     MINUS = auto()
     STAR = auto()
     SLASH = auto()
-    EQ = auto()
-    EQEQ = auto()
-    NOTEQ = auto()
-    LT = auto()
-    LTEQ = auto()
-    GT = auto()
-    GTEQ = auto()
+    PERCENT = auto()   # %
+    BANG = auto()      # !
+    AND = auto()       # &&
+    OR = auto()        # ||
+    EQ = auto()        # =
+    EQEQ = auto()      # ==
+    NOTEQ = auto()     # !=
+    LT = auto()        # <
+    LTEQ = auto()      # <=
+    GT = auto()        # >
+    GTEQ = auto()      # >=
     # punctuation
     LPAREN = auto()
     RPAREN = auto()
@@ -37,12 +42,13 @@ class TokenType(Enum):
     COMMA = auto()
     # end of input
     EOF = auto()
-    
+
+
 @dataclass
 class Token:
     type: TokenType
-    lexeme: str       # exact source text
-    literal: object   # parsed value (int/float for NUMBER, str for STRING)
+    lexeme: str
+    literal: object
     line: int
     col: int
 
@@ -50,11 +56,13 @@ class Token:
         return (f"Token({self.type.name}, {self.lexeme!r}, "
                 f"{self.literal!r}, {self.line}:{self.col})")
 
+
 class LexError(Exception):
     def __init__(self, message: str, line: int, col: int):
         super().__init__(f"[{line}:{col}] lex error: {message}")
         self.line = line
         self.col = col
+
 
 KEYWORDS = {
     "let":    TokenType.LET,
@@ -67,6 +75,7 @@ KEYWORDS = {
     "true":   TokenType.TRUE,
     "false":  TokenType.FALSE,
 }
+
 
 class Lexer:
     def __init__(self, source: str):
@@ -106,7 +115,7 @@ class Lexer:
                 tokens.append(Token(TokenType.EOF, "", None, self.line, self.col))
                 return tokens
             tokens.append(self._next_token())
-        
+
     def _skip_whitespace_and_comments(self) -> None:
         while not self._at_end():
             ch = self._peek()
@@ -117,17 +126,18 @@ class Lexer:
                     self._advance()
             else:
                 return
-            
+
     def _next_token(self) -> Token:
         line, col = self.line, self.col
         ch = self._advance()
 
         simple = {
-            "+": TokenType.PLUS,  "-": TokenType.MINUS,
-            "*": TokenType.STAR,  "/": TokenType.SLASH,
+            "+": TokenType.PLUS,   "-": TokenType.MINUS,
+            "*": TokenType.STAR,   "/": TokenType.SLASH,
+            "%": TokenType.PERCENT,
             "(": TokenType.LPAREN, ")": TokenType.RPAREN,
             "{": TokenType.LBRACE, "}": TokenType.RBRACE,
-            ";": TokenType.SEMI,  ",": TokenType.COMMA,
+            ";": TokenType.SEMI,   ",": TokenType.COMMA,
         }
         if ch in simple:
             return Token(simple[ch], ch, None, line, col)
@@ -139,7 +149,7 @@ class Lexer:
         if ch == "!":
             if self._match("="):
                 return Token(TokenType.NOTEQ, "!=", None, line, col)
-            raise LexError("unexpected '!'", line, col)
+            return Token(TokenType.BANG, "!", None, line, col)
         if ch == "<":
             if self._match("="):
                 return Token(TokenType.LTEQ, "<=", None, line, col)
@@ -148,6 +158,14 @@ class Lexer:
             if self._match("="):
                 return Token(TokenType.GTEQ, ">=", None, line, col)
             return Token(TokenType.GT, ">", None, line, col)
+        if ch == "&":
+            if self._match("&"):
+                return Token(TokenType.AND, "&&", None, line, col)
+            raise LexError("unexpected '&' (did you mean '&&'?)", line, col)
+        if ch == "|":
+            if self._match("|"):
+                return Token(TokenType.OR, "||", None, line, col)
+            raise LexError("unexpected '|' (did you mean '||'?)", line, col)
 
         if ch == '"':
             return self._read_string(line, col)
@@ -157,7 +175,7 @@ class Lexer:
             return self._read_identifier(ch, line, col)
 
         raise LexError(f"unexpected character {ch!r}", line, col)
-    
+
     def _read_string(self, line: int, col: int) -> Token:
         chars: list[str] = []
         while not self._at_end() and self._peek() != '"':
@@ -174,7 +192,7 @@ class Lexer:
                 chars.append(ch)
         if self._at_end():
             raise LexError("unterminated string", line, col)
-        self._advance()  # closing quote
+        self._advance()
         value = "".join(chars)
         return Token(TokenType.STRING, f'"{value}"', value, line, col)
 
@@ -203,6 +221,7 @@ class Lexer:
             chars.append(self._advance())
         text = "".join(chars)
         return Token(KEYWORDS.get(text, TokenType.IDENT), text, None, line, col)
+
 
 if __name__ == "__main__":
     import sys

@@ -155,3 +155,69 @@ def test_non_bool_condition():
 def test_return_at_top_level():
     with pytest.raises(DonkyRuntimeError):
         run_src("return 1;")
+
+
+# ---------- Session 2 additions ----------
+
+def test_modulo(capsys):
+    run_src("print(10 % 3);")
+    assert capsys.readouterr().out == "1\n"
+
+
+def test_modulo_zero():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("print(5 % 0);")
+
+
+def test_not_true(capsys):
+    run_src("print(!true);")
+    assert capsys.readouterr().out == "false\n"
+
+
+def test_not_false(capsys):
+    run_src("print(!false);")
+    assert capsys.readouterr().out == "true\n"
+
+
+def test_not_on_number():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("print(!1);")
+
+
+def test_and_true(capsys):
+    run_src("print(true && true);")
+    assert capsys.readouterr().out == "true\n"
+
+
+def test_and_false(capsys):
+    run_src("print(true && false);")
+    assert capsys.readouterr().out == "false\n"
+
+
+def test_or_false(capsys):
+    run_src("print(false || false);")
+    assert capsys.readouterr().out == "false\n"
+
+
+def test_or_true(capsys):
+    run_src("print(false || true);")
+    assert capsys.readouterr().out == "true\n"
+
+
+def test_and_short_circuits():
+    # If not short-circuited, this would evaluate 1/0 and raise.
+    run_src("print(false && (1 / 0 == 0));")
+
+
+def test_or_short_circuits():
+    run_src("print(true || (1 / 0 == 0));")
+
+
+def test_and_rejects_non_bool():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("print(1 && true);")
+
+
+def test_not_associativity_in_expression(capsys):
+    run_src("print(!true || true);")
+    assert capsys.readouterr().out == "true\n"

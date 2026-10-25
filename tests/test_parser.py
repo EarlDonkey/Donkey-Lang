@@ -96,3 +96,34 @@ def test_missing_brace_errors():
 
 def test_empty_block_ok():
     parse_program("if true {}")
+
+
+# ---------- Session 2 additions ----------
+
+def test_and_binds_tighter_than_or():
+    e = parse_expr("a && b || c")
+    assert isinstance(e, ast.Binary) and e.op == "||"
+    assert isinstance(e.left, ast.Binary) and e.left.op == "&&"
+
+
+def test_or_left_assoc():
+    e = parse_expr("a || b || c")
+    assert isinstance(e, ast.Binary) and e.op == "||"
+    assert isinstance(e.left, ast.Binary) and e.left.op == "||"
+
+
+def test_unary_bang():
+    e = parse_expr("!true")
+    assert isinstance(e, ast.Unary) and e.op == "!"
+
+
+def test_bang_binds_tighter_than_eq():
+    e = parse_expr("!a == b")
+    assert isinstance(e, ast.Binary) and e.op == "=="
+    assert isinstance(e.left, ast.Unary) and e.left.op == "!"
+
+
+def test_modulo_same_precedence_as_mul():
+    e = parse_expr("1 + 2 % 3")
+    assert isinstance(e, ast.Binary) and e.op == "+"
+    assert isinstance(e.right, ast.Binary) and e.right.op == "%"

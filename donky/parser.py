@@ -9,10 +9,11 @@ class ParseError(Exception):
 
 
 INFX_BP = {
+    TokenType.OR:   1, TokenType.AND:  2,
     TokenType.EQEQ: 3, TokenType.NOTEQ: 3,
     TokenType.LT:   4, TokenType.LTEQ: 4, TokenType.GT: 4, TokenType.GTEQ: 4,
     TokenType.PLUS: 6, TokenType.MINUS: 6,
-    TokenType.STAR: 7, TokenType.SLASH: 7,
+    TokenType.STAR: 7, TokenType.SLASH: 7, TokenType.PERCENT: 7,
 }
 
 
@@ -60,7 +61,7 @@ class Parser:
             if bp is None or bp < min_bp:
                 break
             self._advance()
-            right = self.parse_expr(bp + 1)   # +1 = left-associative
+            right = self.parse_expr(bp + 1)
             left = ast.Binary(left, op.lexeme, right)
         return left
 
@@ -78,6 +79,8 @@ class Parser:
                 return ast.BoolLit(False)
             case TokenType.MINUS:
                 return ast.Unary("-", self.parse_expr(8))
+            case TokenType.BANG:
+                return ast.Unary("!", self.parse_expr(8))
             case TokenType.LPAREN:
                 inner = self.parse_expr(0)
                 self._expect(TokenType.RPAREN, "')'")
@@ -123,7 +126,7 @@ class Parser:
         return ast.Block(stmts)
 
     def parse_let(self) -> ast.LetStmt:
-        self._advance()  # 'let'
+        self._advance()
         name = self._expect(TokenType.IDENT, "identifier after 'let'")
         self._expect(TokenType.EQ, "'=' in let binding")
         value = self.parse_expr()
@@ -131,7 +134,7 @@ class Parser:
         return ast.LetStmt(name.lexeme, value)
 
     def parse_print(self) -> ast.PrintStmt:
-        self._advance()  # 'print'
+        self._advance()
         self._expect(TokenType.LPAREN, "'(' after 'print'")
         value = self.parse_expr()
         self._expect(TokenType.RPAREN, "')' after print argument")
@@ -139,7 +142,7 @@ class Parser:
         return ast.PrintStmt(value)
 
     def parse_return(self) -> ast.ReturnStmt:
-        self._advance()  # 'return'
+        self._advance()
         if self._match(TokenType.SEMI):
             return ast.ReturnStmt(None)
         value = self.parse_expr()
@@ -147,7 +150,7 @@ class Parser:
         return ast.ReturnStmt(value)
 
     def parse_if(self) -> ast.IfStmt:
-        self._advance()  # 'if'
+        self._advance()
         cond = self.parse_expr()
         then = self.parse_block()
         else_ = None
@@ -156,13 +159,13 @@ class Parser:
         return ast.IfStmt(cond, then, else_)
 
     def parse_while(self) -> ast.WhileStmt:
-        self._advance()  # 'while'
+        self._advance()
         cond = self.parse_expr()
         body = self.parse_block()
         return ast.WhileStmt(cond, body)
 
     def parse_fn(self) -> ast.FnStmt:
-        self._advance()  # 'fn'
+        self._advance()
         name = self._expect(TokenType.IDENT, "function name")
         self._expect(TokenType.LPAREN, "'(' after function name")
         params: list[str] = []
@@ -180,7 +183,7 @@ class Parser:
     def parse_expr_stmt(self) -> ast.Stmt:
         if self._check(TokenType.IDENT) and self._peek_ahead(1).type is TokenType.EQ:
             name = self._advance().lexeme
-            self._advance()  # '='
+            self._advance()
             value = self.parse_expr()
             self._expect(TokenType.SEMI, "';' after assignment")
             return ast.ExprStmt(ast.Assign(name, value))

@@ -39,11 +39,6 @@ def test_lteq_gteq():
     assert [t.lexeme for t in toks[:4]] == ["<=", ">=", "<", ">"]
 
 
-def test_bang_alone_errors():
-    with pytest.raises(LexError):
-        Lexer("!").tokenize()
-
-
 def test_float():
     t = list(Lexer("10.5").tokenize())[0]
     assert t.type == TokenType.NUMBER
@@ -87,3 +82,39 @@ def test_position_tracking():
     toks = list(Lexer("let\n  x").tokenize())
     assert toks[0].line == 1 and toks[0].col == 1
     assert toks[1].line == 2 and toks[1].col == 3
+
+
+# ---------- Session 2 additions ----------
+
+def test_percent_token():
+    assert types("5 % 3")[1] == TokenType.PERCENT
+
+
+def test_bang_token():
+    toks = list(Lexer("!").tokenize())
+    assert toks[0].type == TokenType.BANG
+    assert toks[0].lexeme == "!"
+
+
+def test_bang_not_bangeq():
+    toks = list(Lexer("! !=").tokenize())
+    assert toks[0].type == TokenType.BANG
+    assert toks[1].type == TokenType.NOTEQ
+
+
+def test_and_token():
+    assert types("a && b")[1] == TokenType.AND
+
+
+def test_or_token():
+    assert types("a || b")[1] == TokenType.OR
+
+
+def test_bare_amp_errors():
+    with pytest.raises(LexError):
+        Lexer("a & b").tokenize()
+
+
+def test_bare_pipe_errors():
+    with pytest.raises(LexError):
+        Lexer("a | b").tokenize()

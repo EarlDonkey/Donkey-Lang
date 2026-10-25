@@ -76,6 +76,34 @@ class Interpreter:
                 return self.env.get(n)
             case ast.Unary(op, operand):
                 return self._eval_unary(op, self.eval_expr(operand))
+            case ast.Binary(l, "&&", r):
+                left = self.eval_expr(l)
+                if not isinstance(left, bool):
+                    raise DonkyRuntimeError(
+                        f"'&&' expects bool, got {type_name(left)}"
+                    )
+                if not left:
+                    return False
+                right = self.eval_expr(r)
+                if not isinstance(right, bool):
+                    raise DonkyRuntimeError(
+                        f"'&&' expects bool, got {type_name(right)}"
+                    )
+                return right
+            case ast.Binary(l, "||", r):
+                left = self.eval_expr(l)
+                if not isinstance(left, bool):
+                    raise DonkyRuntimeError(
+                        f"'||' expects bool, got {type_name(left)}"
+                    )
+                if left:
+                    return True
+                right = self.eval_expr(r)
+                if not isinstance(right, bool):
+                    raise DonkyRuntimeError(
+                        f"'||' expects bool, got {type_name(right)}"
+                    )
+                return right
             case ast.Binary(l, op, r):
                 return self._eval_binary(op, self.eval_expr(l), self.eval_expr(r))
             case ast.Assign(n, v):
@@ -100,6 +128,12 @@ class Interpreter:
                     f"unary '-' expects number, got {type_name(operand)}"
                 )
             return -operand
+        if op == "!":
+            if not isinstance(operand, bool):
+                raise DonkyRuntimeError(
+                    f"unary '!' expects bool, got {type_name(operand)}"
+                )
+            return not operand
         raise DonkyRuntimeError(f"unknown unary operator '{op}'")
 
     def _eval_binary(self, op: str, left: object, right: object) -> object:
@@ -112,7 +146,7 @@ class Interpreter:
                 f"'+' needs two numbers or two strings, got "
                 f"{type_name(left)} and {type_name(right)}"
             )
-        if op in ("-", "*", "/"):
+        if op in ("-", "*", "/", "%"):
             if not (is_number(left) and is_number(right)):
                 raise DonkyRuntimeError(
                     f"'{op}' needs two numbers, got "
@@ -122,6 +156,10 @@ class Interpreter:
                 return left - right
             if op == "*":
                 return left * right
+            if op == "%":
+                if right == 0:
+                    raise DonkyRuntimeError("modulo by zero")
+                return left % right
             if right == 0:
                 raise DonkyRuntimeError("division by zero")
             return left / right
