@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
+from typing import Callable
 
 from donky import ast_nodes as ast
 from donky.errors import DonkyRuntimeError
@@ -40,6 +41,13 @@ class Function:
     return_type: str
 
 
+@dataclass
+class Builtin:
+    name: str
+    arity: int
+    impl: Callable[[list[object]], object]
+
+
 def is_number(v: object) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
@@ -51,7 +59,7 @@ def type_name(v: object) -> str:
         return "number"
     if isinstance(v, str):
         return "string"
-    if isinstance(v, Function):
+    if isinstance(v, (Function, Builtin)):
         return "function"
     return type(v).__name__
 
@@ -61,4 +69,6 @@ def format_value(v: object) -> str:
         return "true" if v else "false"
     if isinstance(v, Function):
         return f"<fn {v.name}>"
+    if isinstance(v, Builtin):
+        return f"<builtin {v.name}>"
     return str(v)

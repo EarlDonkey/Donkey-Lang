@@ -221,3 +221,99 @@ def test_and_rejects_non_bool():
 def test_not_associativity_in_expression(capsys):
     run_src("print(!true || true);")
     assert capsys.readouterr().out == "true\n"
+    
+# ---------- Session 3: builtins ----------
+
+def test_len(capsys):
+    run_src('print(len("hello"));')
+    assert capsys.readouterr().out == "5\n"
+
+
+def test_len_empty(capsys):
+    run_src('print(len(""));')
+    assert capsys.readouterr().out == "0\n"
+
+
+def test_len_non_string():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("print(len(5));")
+
+
+def test_len_wrong_arity():
+    with pytest.raises(DonkyRuntimeError):
+        run_src('print(len("a", "b"));')
+
+
+def test_str_returns_string(capsys):
+    run_src('print(str(10) + "!");')
+    assert capsys.readouterr().out == "10!\n"
+
+
+def test_str_of_bool(capsys):
+    run_src('print(str(true) + "!");')
+    assert capsys.readouterr().out == "true!\n"
+
+
+def test_str_of_string(capsys):
+    run_src('print(str("hi") + "!");')
+    assert capsys.readouterr().out == "hi!\n"
+
+
+def test_str_is_string(capsys):
+    run_src("print(type(str(10)));")
+    assert capsys.readouterr().out == "string\n"
+
+
+def test_num_from_int_string(capsys):
+    run_src('print(num("42") + 8);')
+    assert capsys.readouterr().out == "50\n"
+
+
+def test_num_from_float_string(capsys):
+    run_src('print(num("3.5") + 1.5);')
+    assert capsys.readouterr().out == "5.0\n"
+
+
+def test_num_from_number(capsys):
+    run_src("print(num(10) + 5);")
+    assert capsys.readouterr().out == "15\n"
+
+
+def test_num_invalid():
+    with pytest.raises(DonkyRuntimeError):
+        run_src('print(num("abc"));')
+
+
+def test_num_from_bool():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("print(num(true));")
+
+
+def test_type_number(capsys):
+    run_src("print(type(1));")
+    assert capsys.readouterr().out == "number\n"
+
+
+def test_type_string(capsys):
+    run_src('print(type("a"));')
+    assert capsys.readouterr().out == "string\n"
+
+
+def test_type_bool(capsys):
+    run_src("print(type(true));")
+    assert capsys.readouterr().out == "bool\n"
+
+
+def test_type_user_function(capsys):
+    run_src("fn f() -> void { } print(type(f));")
+    assert capsys.readouterr().out == "function\n"
+
+
+def test_type_builtin(capsys):
+    run_src("print(type(len));")
+    assert capsys.readouterr().out == "function\n"
+
+
+def test_builtin_shadowable(capsys):
+    run_src("let len = 5; print(len);")
+    assert capsys.readouterr().out == "5\n"

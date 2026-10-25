@@ -1,7 +1,8 @@
 from donky import ast_nodes as ast
+from donky.builtins import install_builtins
 from donky.errors import DonkyRuntimeError
 from donky.values import (
-    Environment, Function, format_value, is_number, type_name,
+    Builtin, Environment, Function, format_value, is_number, type_name,
 )
 
 
@@ -15,6 +16,7 @@ class Interpreter:
     def __init__(self) -> None:
         self.globals = Environment()
         self.env = self.globals
+        install_builtins(self.globals)
 
     # ---------- entry ----------
 
@@ -112,11 +114,13 @@ class Interpreter:
                 return val
             case ast.Call(callee, args):
                 fn = self.env.get(callee)
-                if not isinstance(fn, Function):
+                if not isinstance(fn, (Function, Builtin)):
                     raise DonkyRuntimeError(
                         f"'{callee}' is not a function (got {type_name(fn)})"
                     )
                 argvals = [self.eval_expr(a) for a in args]
+                if isinstance(fn, Builtin):
+                    return self._call_builtin(fn, argvals)
                 return self.call_function(fn, argvals)
             case _:
                 raise DonkyRuntimeError(f"cannot evaluate {type(expr).__name__}")
@@ -202,6 +206,13 @@ class Interpreter:
         finally:
             self.env = saved
         return None
+
+    def _call_builtin(self, fn: Builtin, args: list[object]) -> object:
+        if len(args) != fn.arity:
+            raise DonkyRuntimeError(
+                f"{fn.name}() expects {fn.arity} argument(s), got {len(args)}"
+            )
+        return fn.impl(args)
 
     # ---------- helpers ----------
 
