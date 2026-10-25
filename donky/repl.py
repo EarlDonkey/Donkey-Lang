@@ -94,7 +94,7 @@ def _report(src: str, interp: Interpreter) -> None:
     except (LexError, ParseError):
         pass
     except DonkyRuntimeError as e:
-        print(f"donky: runtime error: {e}", file=sys.stderr)
+        print(f"donky: {e}", file=sys.stderr)
         return
 
     # Retry with ';' appended (statements without trailing semicolon)
@@ -105,7 +105,7 @@ def _report(src: str, interp: Interpreter) -> None:
     except (LexError, ParseError):
         pass
     except DonkyRuntimeError as e:
-        print(f"donky: runtime error: {e}", file=sys.stderr)
+        print(f"donky: {e}", file=sys.stderr)
         return
 
     # All attempts failed — show the first real error for diagnosis

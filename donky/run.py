@@ -9,7 +9,7 @@ from donky.parser import ParseError, Parser
 def main() -> None:
     path = sys.argv[1] if len(sys.argv) > 1 else "examples/hello.donk"
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8-sig") as f:
             src = f.read()
     except OSError as e:
         print(f"donky: cannot read {path}: {e}", file=sys.stderr)
@@ -26,7 +26,7 @@ def main() -> None:
         print(f"{path}: {e}", file=sys.stderr)
         sys.exit(1)
     except DonkyRuntimeError as e:
-        print(f"{path}: runtime error: {e}", file=sys.stderr)
+        print(f"{path}: {e}", file=sys.stderr)
         sys.exit(1)
 
 

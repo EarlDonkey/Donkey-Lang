@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -8,39 +8,55 @@ from typing import Optional
 @dataclass
 class NumberLit:
     value: int | float
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class StringLit:
     value: str
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class BoolLit:
     value: bool
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class Ident:
     name: str
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class Binary:
     left: Expr
-    op: str          # the lexeme: "+", "-", "==", ...
+    op: str
     right: Expr
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class Unary:
-    op: str          # "-" or "!"
+    op: str
     operand: Expr
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class Assign:
     name: str
     value: Expr
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class Call:
     callee: str
     args: list[Expr]
+    line: int = 0
+    col: int = 0
 
 
 # ---------- statements ----------
@@ -49,25 +65,35 @@ class Call:
 class LetStmt:
     name: str
     value: Expr
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class PrintStmt:
     value: Expr
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class ExprStmt:
     expr: Expr
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class IfStmt:
     cond: Expr
     then: Block
     else_: Optional[Block]
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class WhileStmt:
     cond: Expr
     body: Block
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class FnStmt:
@@ -75,21 +101,29 @@ class FnStmt:
     params: list[str]
     return_type: str
     body: Block
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class ReturnStmt:
     value: Optional[Expr]
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class Block:
     stmts: list[Stmt]
+    line: int = 0
+    col: int = 0
 
 
 @dataclass
 class Program:
     stmts: list[Stmt]
+    line: int = 0
+    col: int = 0
 
 
-# type aliases — used only for readability
+# type aliases
 Expr = NumberLit | StringLit | BoolLit | Ident | Binary | Unary | Assign | Call
 Stmt = LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | FnStmt | ReturnStmt | Block

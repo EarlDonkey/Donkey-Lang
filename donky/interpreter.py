@@ -21,36 +21,36 @@ class Interpreter:
     # ---------- entry ----------
 
     def run(self, program: ast.Program) -> None:
-        try:
-            for stmt in program.stmts:
+        for stmt in program.stmts:
+            try:
                 self.exec_stmt(stmt)
-        except ReturnSignal:
-            raise DonkyRuntimeError("'return' outside of a function")
+            except ReturnSignal:
+                raise self._err(stmt, "'return' outside of a function")
 
     # ---------- statements ----------
 
     def exec_stmt(self, stmt: ast.Stmt) -> None:
         match stmt:
-            case ast.LetStmt(name, value):
+            case ast.LetStmt(name, value, line, col):
                 self.env.define(name, self.eval_expr(value))
-            case ast.PrintStmt(value):
+            case ast.PrintStmt(value, line, col):
                 print(format_value(self.eval_expr(value)))
-            case ast.ExprStmt(expr):
+            case ast.ExprStmt(expr, line, col):
                 self.eval_expr(expr)
-            case ast.IfStmt(cond, then, else_):
-                if self._require_bool(self.eval_expr(cond)):
+            case ast.IfStmt(cond, then, else_, line, col):
+                if self._require_bool(self.eval_expr(cond), stmt):
                     self.exec_block(then)
                 elif else_ is not None:
                     self.exec_block(else_)
-            case ast.WhileStmt(cond, body):
-                while self._require_bool(self.eval_expr(cond)):
+            case ast.WhileStmt(cond, body, line, col):
+                while self._require_bool(self.eval_expr(cond), stmt):
                     self.exec_block(body)
-            case ast.FnStmt(name, params, ret, body):
+            case ast.FnStmt(name, params, ret, body, line, col):
                 self.env.define(name, Function(name, params, body, self.env, ret))
-            case ast.ReturnStmt(value):
+            case ast.ReturnStmt(value, line, col):
                 v = None if value is None else self.eval_expr(value)
                 raise ReturnSignal(v)
-            case ast.Block(stmts):
+            case ast.Block(stmts, line, col):
                 self.exec_block(stmt)
             case _:
                 raise DonkyRuntimeError(f"cannot execute {type(stmt).__name__}")
@@ -68,93 +68,98 @@ class Interpreter:
 
     def eval_expr(self, expr: ast.Expr) -> object:
         match expr:
-            case ast.NumberLit(v):
+            case ast.NumberLit(v, line, col):
                 return v
-            case ast.StringLit(v):
+            case ast.StringLit(v, line, col):
                 return v
-            case ast.BoolLit(v):
+            case ast.BoolLit(v, line, col):
                 return v
-            case ast.Ident(n):
-                return self.env.get(n)
-            case ast.Unary(op, operand):
-                return self._eval_unary(op, self.eval_expr(operand))
-            case ast.Binary(l, "&&", r):
+            case ast.Ident(n, line, col):
+                try:
+                    return self.env.get(n)
+                except DonkyRuntimeError:
+                    raise self._err(expr, f"undefined variable '{n}'")
+            case ast.Unary(op, operand, line, col):
+                return self._eval_unary(op, self.eval_expr(operand), expr)
+            case ast.Binary(l, "&&", r, line, col):
                 left = self.eval_expr(l)
                 if not isinstance(left, bool):
-                    raise DonkyRuntimeError(
-                        f"'&&' expects bool, got {type_name(left)}"
-                    )
+                    raise self._err(expr, f"'&&' expects bool, got {type_name(left)}")
                 if not left:
                     return False
                 right = self.eval_expr(r)
                 if not isinstance(right, bool):
-                    raise DonkyRuntimeError(
-                        f"'&&' expects bool, got {type_name(right)}"
-                    )
+                    raise self._err(expr, f"'&&' expects bool, got {type_name(right)}")
                 return right
-            case ast.Binary(l, "||", r):
+            case ast.Binary(l, "||", r, line, col):
                 left = self.eval_expr(l)
                 if not isinstance(left, bool):
-                    raise DonkyRuntimeError(
-                        f"'||' expects bool, got {type_name(left)}"
-                    )
+                    raise self._err(expr, f"'||' expects bool, got {type_name(left)}")
                 if left:
                     return True
                 right = self.eval_expr(r)
                 if not isinstance(right, bool):
-                    raise DonkyRuntimeError(
-                        f"'||' expects bool, got {type_name(right)}"
-                    )
+                    raise self._err(expr, f"'||' expects bool, got {type_name(right)}")
                 return right
-            case ast.Binary(l, op, r):
-                return self._eval_binary(op, self.eval_expr(l), self.eval_expr(r))
-            case ast.Assign(n, v):
+            case ast.Binary(l, op, r, line, col):
+                return self._eval_binary(op, self.eval_expr(l), self.eval_expr(r), expr)
+            case ast.Assign(n, v, line, col):
                 val = self.eval_expr(v)
-                self.env.assign(n, val)
+                try:
+                    self.env.assign(n, val)
+                except DonkyRuntimeError:
+                    raise self._err(expr, f"assignment to undefined variable '{n}'")
                 return val
-            case ast.Call(callee, args):
-                fn = self.env.get(callee)
+            case ast.Call(callee, args, line, col):
+                try:
+                    fn = self.env.get(callee)
+                except DonkyRuntimeError:
+                    raise self._err(expr, f"undefined function '{callee}'")
                 if not isinstance(fn, (Function, Builtin)):
-                    raise DonkyRuntimeError(
-                        f"'{callee}' is not a function (got {type_name(fn)})"
+                    raise self._err(
+                        expr,
+                        f"'{callee}' is not a function (got {type_name(fn)})",
                     )
                 argvals = [self.eval_expr(a) for a in args]
                 if isinstance(fn, Builtin):
-                    return self._call_builtin(fn, argvals)
-                return self.call_function(fn, argvals)
+                    return self._call_builtin(fn, argvals, expr)
+                return self.call_function(fn, argvals, expr)
             case _:
                 raise DonkyRuntimeError(f"cannot evaluate {type(expr).__name__}")
 
-    def _eval_unary(self, op: str, operand: object) -> object:
+    def _eval_unary(self, op: str, operand: object, node: ast.Expr) -> object:
         if op == "-":
             if not is_number(operand):
-                raise DonkyRuntimeError(
-                    f"unary '-' expects number, got {type_name(operand)}"
+                raise self._err(
+                    node, f"unary '-' expects number, got {type_name(operand)}"
                 )
             return -operand
         if op == "!":
             if not isinstance(operand, bool):
-                raise DonkyRuntimeError(
-                    f"unary '!' expects bool, got {type_name(operand)}"
+                raise self._err(
+                    node, f"unary '!' expects bool, got {type_name(operand)}"
                 )
             return not operand
         raise DonkyRuntimeError(f"unknown unary operator '{op}'")
 
-    def _eval_binary(self, op: str, left: object, right: object) -> object:
+    def _eval_binary(self, op: str, left: object, right: object,
+                     node: ast.Expr) -> object:
         if op == "+":
             if is_number(left) and is_number(right):
                 return left + right
             if isinstance(left, str) and isinstance(right, str):
                 return left + right
-            raise DonkyRuntimeError(
+            raise self._err(
+                node,
                 f"'+' needs two numbers or two strings, got "
-                f"{type_name(left)} and {type_name(right)}"
+                f"{type_name(left)} and {type_name(right)}",
             )
         if op in ("-", "*", "/", "%"):
             if not (is_number(left) and is_number(right)):
-                raise DonkyRuntimeError(
+                raise self._err(
+                    node,
                     f"'{op}' needs two numbers, got "
-                    f"{type_name(left)} and {type_name(right)}"
+                    f"{type_name(left)} and {type_name(right)}",
                 )
             if op == "-":
                 return left - right
@@ -162,10 +167,10 @@ class Interpreter:
                 return left * right
             if op == "%":
                 if right == 0:
-                    raise DonkyRuntimeError("modulo by zero")
+                    raise self._err(node, "modulo by zero")
                 return left % right
             if right == 0:
-                raise DonkyRuntimeError("division by zero")
+                raise self._err(node, "division by zero")
             return left / right
         if op == "==":
             return left == right
@@ -175,9 +180,10 @@ class Interpreter:
             both_num = is_number(left) and is_number(right)
             both_str = isinstance(left, str) and isinstance(right, str)
             if not (both_num or both_str):
-                raise DonkyRuntimeError(
+                raise self._err(
+                    node,
                     f"'{op}' needs two numbers or two strings, got "
-                    f"{type_name(left)} and {type_name(right)}"
+                    f"{type_name(left)} and {type_name(right)}",
                 )
             if op == "<":  return left < right
             if op == "<=": return left <= right
@@ -187,10 +193,12 @@ class Interpreter:
 
     # ---------- calls ----------
 
-    def call_function(self, fn: Function, args: list[object]) -> object:
+    def call_function(self, fn: Function, args: list[object],
+                      node: ast.Expr) -> object:
         if len(args) != len(fn.params):
-            raise DonkyRuntimeError(
-                f"{fn.name}() expects {len(fn.params)} argument(s), got {len(args)}"
+            raise self._err(
+                node,
+                f"{fn.name}() expects {len(fn.params)} argument(s), got {len(args)}",
             )
         call_env = Environment(parent=fn.closure)
         for p, a in zip(fn.params, args):
@@ -207,16 +215,21 @@ class Interpreter:
             self.env = saved
         return None
 
-    def _call_builtin(self, fn: Builtin, args: list[object]) -> object:
+    def _call_builtin(self, fn: Builtin, args: list[object],
+                      node: ast.Expr) -> object:
         if len(args) != fn.arity:
-            raise DonkyRuntimeError(
-                f"{fn.name}() expects {fn.arity} argument(s), got {len(args)}"
+            raise self._err(
+                node,
+                f"{fn.name}() expects {fn.arity} argument(s), got {len(args)}",
             )
         return fn.impl(args)
 
     # ---------- helpers ----------
 
-    def _require_bool(self, v: object) -> bool:
+    def _require_bool(self, v: object, node: ast.Stmt) -> bool:
         if not isinstance(v, bool):
-            raise DonkyRuntimeError(f"condition must be bool, got {type_name(v)}")
+            raise self._err(node, f"condition must be bool, got {type_name(v)}")
         return v
+
+    def _err(self, node: object, msg: str) -> DonkyRuntimeError:
+        return DonkyRuntimeError(msg, node.line, node.col)

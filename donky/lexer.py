@@ -79,6 +79,10 @@ KEYWORDS = {
 
 class Lexer:
     def __init__(self, source: str):
+        # Strip a UTF-8 BOM if present. Windows tools (PowerShell's
+        # `Out-File -Encoding utf8`, Notepad's "UTF-8" save) prepend one.
+        if source.startswith("\ufeff"):
+            source = source[1:]
         self.source = source
         self.pos = 0
         self.line = 1
