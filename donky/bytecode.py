@@ -40,7 +40,7 @@ class Op(Enum):
     JUMP_IF_TRUE_PEEK = auto()   # peek; if truthy, jump (don't pop)
     # --- functions ---
     MAKE_FN = auto()          # MAKE_FN idx  → push functions[idx]
-    CALL = auto()             # CALL argc    → pop argc args + callee, push result
+    CALL = auto()             # CALL argc name  → pop argc args + callee, push result
     RETURN = auto()           # RETURN       → return top of stack
     # --- I/O ---
     PRINT = auto()            # PRINT        → pop and print
@@ -51,6 +51,7 @@ class CodeObject:
     name: str
     arity: int
     instructions: list[tuple] = field(default_factory=list)
+    positions: list[tuple[int, int]] = field(default_factory=list)
     constants: list[object] = field(default_factory=list)
     functions: list["CodeObject"] = field(default_factory=list)
     slot_count: int = 0

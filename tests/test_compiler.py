@@ -120,7 +120,7 @@ def test_call_compilation():
     code = compile_src('print(len("hi"));')
     assert code.instructions[0] == (Op.LOAD_GLOBAL, "len")
     assert code.instructions[1] == (Op.CONST, 0)
-    assert code.instructions[2] == (Op.CALL, 1)
+    assert code.instructions[2] == (Op.CALL, 1, "len")
     assert code.instructions[3] == (Op.PRINT,)
 
 

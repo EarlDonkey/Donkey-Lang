@@ -33,6 +33,7 @@ class Compiler:
         self.code = CodeObject(name="<main>", arity=0)
         self.scopes: list[dict[str, int]] = []
         self.slot_counter = 0
+        self.position: tuple[int, int] = (0, 0)
 
     def compile(self, program: ast.Program) -> CodeObject:
         for stmt in program.stmts:
@@ -52,7 +53,6 @@ class Compiler:
         return len(self.scopes) == 0
 
     def _resolve(self, name: str) -> tuple[str, int | None]:
-        """Return ('local', slot) or ('global', None)."""
         for scope in reversed(self.scopes):
             if name in scope:
                 return ("local", scope[name])
@@ -69,11 +69,13 @@ class Compiler:
     def _emit(self, op: Op, *args) -> int:
         idx = len(self.code.instructions)
         self.code.instructions.append((op,) + args)
+        self.code.positions.append(self.position)
         return idx
 
     def _emit_jump(self, op: Op) -> int:
         idx = len(self.code.instructions)
         self.code.instructions.append((op, -1))
+        self.code.positions.append(self.position)
         return idx
 
     def _patch_jump(self, idx: int) -> None:
@@ -93,7 +95,6 @@ class Compiler:
             self._emit(Op.LOAD_GLOBAL, name)
 
     def _declare_name(self, name: str) -> None:
-        """let / fn — creates a new binding."""
         if self._at_global_scope():
             self._emit(Op.DEFINE_GLOBAL, name)
         else:
@@ -101,7 +102,6 @@ class Compiler:
             self._emit(Op.STORE_LOCAL, slot)
 
     def _store_existing(self, name: str) -> None:
-        """assignment — updates an existing binding."""
         kind, slot = self._resolve(name)
         if kind == "local":
             self._emit(Op.STORE_LOCAL, slot)
@@ -111,6 +111,11 @@ class Compiler:
     # ---------- statements ----------
 
     def compile_stmt(self, stmt: ast.Stmt) -> None:
+        line = getattr(stmt, "line", 0)
+        col = getattr(stmt, "col", 0)
+        if line > 0:
+            self.position = (line, col)
+
         match stmt:
             case ast.LetStmt(name, value, line, col):
                 self.compile_expr(value)
@@ -120,8 +125,6 @@ class Compiler:
                 self._emit(Op.PRINT)
             case ast.ExprStmt(expr, line, col):
                 self.compile_expr(expr)
-                # Assign already consumed its value via STORE_*.
-                # Everything else leaves a value that must be discarded.
                 if not isinstance(expr, ast.Assign):
                     self._emit(Op.POP)
             case ast.IfStmt(cond, then, else_, line, col):
@@ -152,7 +155,9 @@ class Compiler:
                 )
 
     def _compile_if(self, cond, then, else_):
+        saved = self.position
         self.compile_expr(cond)
+        self.position = saved
         jf_idx = self._emit_jump(Op.JUMP_IF_FALSE)
         self._compile_block_scoped(then)
         if else_ is not None:
@@ -164,8 +169,10 @@ class Compiler:
             self._patch_jump(jf_idx)
 
     def _compile_while(self, cond, body):
+        saved = self.position
         loop_start = self._current_offset()
         self.compile_expr(cond)
+        self.position = saved
         jf_idx = self._emit_jump(Op.JUMP_IF_FALSE)
         self._compile_block_scoped(body)
         self._emit(Op.JUMP, loop_start)
@@ -185,6 +192,7 @@ class Compiler:
         saved_code = self.code
         saved_scopes = self.scopes
         saved_slots = self.slot_counter
+        saved_position = self.position
 
         fn_code = CodeObject(name=name, arity=len(params))
         self.code = fn_code
@@ -211,12 +219,18 @@ class Compiler:
         self.code = saved_code
         self.scopes = saved_scopes
         self.slot_counter = saved_slots
+        self.position = saved_position
 
         return fn_code
 
     # ---------- expressions ----------
 
     def compile_expr(self, expr: ast.Expr) -> None:
+        line = getattr(expr, "line", 0)
+        col = getattr(expr, "col", 0)
+        if line > 0:
+            self.position = (line, col)
+
         match expr:
             case ast.NumberLit(v, line, col):
                 self._emit(Op.CONST, self.code.constant_index(v))
@@ -257,7 +271,7 @@ class Compiler:
                 self._load_name(callee)
                 for a in args:
                     self.compile_expr(a)
-                self._emit(Op.CALL, len(args))
+                self._emit(Op.CALL, len(args), callee)
             case _:
                 raise DonkyRuntimeError(
                     f"cannot compile {type(expr).__name__}"
