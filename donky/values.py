@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from donky import ast_nodes as ast
+from donky.bytecode import CodeObject
 from donky.errors import DonkyRuntimeError
 
 
@@ -59,7 +60,7 @@ def type_name(v: object) -> str:
         return "number"
     if isinstance(v, str):
         return "string"
-    if isinstance(v, (Function, Builtin)):
+    if isinstance(v, (Function, Builtin, CodeObject)):
         return "function"
     return type(v).__name__
 
@@ -71,4 +72,6 @@ def format_value(v: object) -> str:
         return f"<fn {v.name}>"
     if isinstance(v, Builtin):
         return f"<builtin {v.name}>"
+    if isinstance(v, CodeObject):
+        return f"<fn {v.name}>"
     return str(v)
