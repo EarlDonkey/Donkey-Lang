@@ -2,7 +2,7 @@ from donky import ast_nodes as ast
 from donky.builtins import install_builtins
 from donky.errors import DonkyRuntimeError
 from donky.values import (
-    Builtin, Environment, Function, format_value, is_number, type_name,
+    Builtin, Environment, Function, format_value, is_int, is_number, type_name,
 )
 
 
@@ -52,6 +52,15 @@ class Interpreter:
                 raise ReturnSignal(v)
             case ast.Block(stmts, line, col):
                 self.exec_block(stmt)
+            case ast.IndexSet(name, index_expr, value_expr, line, col):
+                try:
+                    array = self.env.get(name)
+                except DonkyRuntimeError:
+                    raise self._err(stmt, f"undefined variable '{name}'")
+                index = self.eval_expr(index_expr)
+                value = self.eval_expr(value_expr)
+                self._check_index(array, index, stmt)
+                array[index] = value
             case _:
                 raise DonkyRuntimeError(f"cannot execute {type(stmt).__name__}")
 
@@ -124,8 +133,25 @@ class Interpreter:
                 if isinstance(fn, Builtin):
                     return self._call_builtin(fn, argvals, expr)
                 return self.call_function(fn, argvals, expr)
+            case ast.ArrayLit(elems, line, col):
+                return [self.eval_expr(e) for e in elems]
+            case ast.Index(array_expr, index_expr, line, col):
+                array = self.eval_expr(array_expr)
+                index = self.eval_expr(index_expr)
+                self._check_index(array, index, expr)
+                return array[index]
             case _:
                 raise DonkyRuntimeError(f"cannot evaluate {type(expr).__name__}")
+
+    def _check_index(self, array: object, index: object, node: object) -> None:
+        if not isinstance(array, list):
+            raise self._err(node, f"cannot index {type_name(array)}, expected array")
+        if not is_int(index):
+            raise self._err(node, f"array index must be integer, got {type_name(index)}")
+        if index < 0 or index >= len(array):
+            raise self._err(
+                node, f"index {index} out of range for array of length {len(array)}"
+            )
 
     def _eval_unary(self, op: str, operand: object, node: ast.Expr) -> object:
         if op == "-":
@@ -154,6 +180,21 @@ class Interpreter:
                 f"'+' needs two numbers or two strings, got "
                 f"{type_name(left)} and {type_name(right)}",
             )
+        if op == "div":
+            if not (is_number(left) and is_number(right)):
+                raise self._err(
+                    node,
+                    f"'div' needs two numbers, got "
+                    f"{type_name(left)} and {type_name(right)}",
+                )
+            if not (is_int(left) and is_int(right)):
+                raise self._err(node, "'div' expects integers, not floats")
+            if right == 0:
+                raise self._err(node, "integer division by zero")
+            q = abs(left) // abs(right)
+            if (left < 0) != (right < 0):
+                return -q
+            return q
         if op in ("-", "*", "/", "%"):
             if not (is_number(left) and is_number(right)):
                 raise self._err(
@@ -222,11 +263,16 @@ class Interpreter:
                 node,
                 f"{fn.name}() expects {fn.arity} argument(s), got {len(args)}",
             )
-        return fn.impl(args)
+        try:
+            return fn.impl(args)
+        except DonkyRuntimeError as e:
+            if e.line == 0:
+                raise self._err(node, e.message) from None
+            raise
 
     # ---------- helpers ----------
 
-    def _require_bool(self, v: object, node: ast.Stmt) -> bool:
+    def _require_bool(self, v: object, node: object) -> bool:
         if not isinstance(v, bool):
             raise self._err(node, f"condition must be bool, got {type_name(v)}")
         return v

@@ -6,9 +6,13 @@ from donky.values import (
 
 def _len(args: list[object]) -> object:
     v = args[0]
-    if not isinstance(v, str):
-        raise DonkyRuntimeError(f"len() expects string, got {type_name(v)}")
-    return len(v)
+    if isinstance(v, str):
+        return len(v)
+    if isinstance(v, list):
+        return len(v)
+    raise DonkyRuntimeError(
+        f"len() expects string or array, got {type_name(v)}"
+    )
 
 
 def _str(args: list[object]) -> object:
@@ -39,11 +43,34 @@ def _type(args: list[object]) -> object:
     return type_name(args[0])
 
 
+def _push(args: list[object]) -> object:
+    arr, val = args
+    if not isinstance(arr, list):
+        raise DonkyRuntimeError(
+            f"push() expects array as first argument, got {type_name(arr)}"
+        )
+    arr.append(val)
+    return None
+
+
+def _pop(args: list[object]) -> object:
+    arr = args[0]
+    if not isinstance(arr, list):
+        raise DonkyRuntimeError(
+            f"pop() expects array, got {type_name(arr)}"
+        )
+    if not arr:
+        raise DonkyRuntimeError("pop() from empty array")
+    return arr.pop()
+
+
 BUILTINS = [
     ("len",  1, _len),
     ("str",  1, _str),
     ("num",  1, _num),
     ("type", 1, _type),
+    ("push", 2, _push),
+    ("pop",  1, _pop),
 ]
 
 

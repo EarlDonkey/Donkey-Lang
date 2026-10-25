@@ -118,3 +118,21 @@ def test_bare_amp_errors():
 def test_bare_pipe_errors():
     with pytest.raises(LexError):
         Lexer("a | b").tokenize()
+
+def test_lbracket_token():
+    assert types("[1]")[0] == TokenType.LBRACKET
+
+
+def test_rbracket_token():
+    toks = list(Lexer("[]").tokenize())
+    assert toks[0].type == TokenType.LBRACKET
+    assert toks[1].type == TokenType.RBRACKET
+
+
+def test_div_token():
+    assert types("7 div 2")[1] == TokenType.DIV
+
+
+def test_div_is_keyword_not_ident():
+    toks = list(Lexer("div").tokenize())
+    assert toks[0].type == TokenType.DIV

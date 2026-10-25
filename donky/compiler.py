@@ -16,19 +16,13 @@ class CompileError(Exception):
 BIN_OP_MAP = {
     "+": Op.ADD, "-": Op.SUB, "*": Op.MUL,
     "/": Op.DIV, "%": Op.MOD,
+    "div": Op.FLOOR_DIV,
     "==": Op.EQ, "!=": Op.NE,
     "<": Op.LT, "<=": Op.LE, ">": Op.GT, ">=": Op.GE,
 }
 
 
 class Compiler:
-    """Compiles a Donky Program into a CodeObject for the stack VM.
-
-    v1 has no closures: functions see globals and their own frame only.
-    Any block (function body, if/while body, standalone braces) creates
-    a new local scope. Top-level let/fn are globals.
-    """
-
     def __init__(self) -> None:
         self.code = CodeObject(name="<main>", arity=0)
         self.scopes: list[dict[str, int]] = []
@@ -149,6 +143,11 @@ class Compiler:
                 self._emit(Op.RETURN)
             case ast.Block(stmts, line, col):
                 self._compile_block_scoped(stmt)
+            case ast.IndexSet(name, index, value, line, col):
+                self._load_name(name)
+                self.compile_expr(index)
+                self.compile_expr(value)
+                self._emit(Op.INDEX_SET)
             case _:
                 raise DonkyRuntimeError(
                     f"cannot compile {type(stmt).__name__}"
@@ -272,6 +271,14 @@ class Compiler:
                 for a in args:
                     self.compile_expr(a)
                 self._emit(Op.CALL, len(args), callee)
+            case ast.ArrayLit(elems, line, col):
+                for e in elems:
+                    self.compile_expr(e)
+                self._emit(Op.NEW_ARRAY, len(elems))
+            case ast.Index(array, index, line, col):
+                self.compile_expr(array)
+                self.compile_expr(index)
+                self._emit(Op.INDEX_GET)
             case _:
                 raise DonkyRuntimeError(
                     f"cannot compile {type(expr).__name__}"

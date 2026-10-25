@@ -127,3 +127,48 @@ def test_modulo_same_precedence_as_mul():
     e = parse_expr("1 + 2 % 3")
     assert isinstance(e, ast.Binary) and e.op == "+"
     assert isinstance(e.right, ast.Binary) and e.right.op == "%"
+    
+def test_div_same_precedence_as_mul():
+    e = parse_expr("1 + 2 div 3")
+    assert isinstance(e, ast.Binary) and e.op == "+"
+    assert isinstance(e.right, ast.Binary) and e.right.op == "div"
+
+
+def test_array_literal_empty():
+    e = parse_expr("[]")
+    assert isinstance(e, ast.ArrayLit) and e.elems == []
+
+
+def test_array_literal_elems():
+    e = parse_expr("[1, 2, 3]")
+    assert isinstance(e, ast.ArrayLit) and len(e.elems) == 3
+
+
+def test_index_read():
+    e = parse_expr("a[0]")
+    assert isinstance(e, ast.Index)
+    assert isinstance(e.array, ast.Ident) and e.array.name == "a"
+    assert isinstance(e.index, ast.NumberLit) and e.index.value == 0
+
+
+def test_index_chain():
+    e = parse_expr("a[0][1]")
+    assert isinstance(e, ast.Index)
+    assert isinstance(e.array, ast.Index)
+
+
+def test_index_assignment():
+    p = parse_program("a[0] = 5;")
+    s = p.stmts[0]
+    assert isinstance(s, ast.IndexSet)
+    assert s.array_name == "a"
+
+
+def test_array_trailing_comma_errors():
+    with pytest.raises(ParseError):
+        parse_expr("[1, 2,]")
+
+
+def test_index_missing_bracket():
+    with pytest.raises(ParseError):
+        parse_expr("a[0")

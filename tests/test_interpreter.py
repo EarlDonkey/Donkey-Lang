@@ -317,3 +317,126 @@ def test_type_builtin(capsys):
 def test_builtin_shadowable(capsys):
     run_src("let len = 5; print(len);")
     assert capsys.readouterr().out == "5\n"
+
+# ---------- Session 4: div ----------
+
+def test_div_basic(capsys):
+    run_src("print(7 div 2);")
+    assert capsys.readouterr().out == "3\n"
+
+
+def test_div_exact(capsys):
+    run_src("print(10 div 5);")
+    assert capsys.readouterr().out == "2\n"
+
+
+def test_div_truncates_toward_zero(capsys):
+    run_src("print(-7 div 2); print(7 div -2); print(-7 div -2);")
+    assert capsys.readouterr().out == "-3\n-3\n3\n"
+
+
+def test_div_by_zero():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("print(7 div 0);")
+
+
+def test_div_rejects_floats():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("print(7.0 div 2);")
+
+
+def test_div_rejects_bool():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("print(true div 2);")
+
+
+# ---------- Session 5: arrays ----------
+
+def test_array_literal(capsys):
+    run_src("print([1, 2, 3]);")
+    assert capsys.readouterr().out == "[1, 2, 3]\n"
+
+
+def test_array_empty(capsys):
+    run_src("print([]);")
+    assert capsys.readouterr().out == "[]\n"
+
+
+def test_array_index(capsys):
+    run_src("let a = [10, 20, 30]; print(a[1]);")
+    assert capsys.readouterr().out == "20\n"
+
+
+def test_array_index_set(capsys):
+    run_src("let a = [1, 2, 3]; a[1] = 99; print(a);")
+    assert capsys.readouterr().out == "[1, 99, 3]\n"
+
+
+def test_array_len(capsys):
+    run_src("print(len([1, 2, 3]));")
+    assert capsys.readouterr().out == "3\n"
+
+
+def test_array_push(capsys):
+    run_src("let a = [1]; push(a, 2); print(a);")
+    assert capsys.readouterr().out == "[1, 2]\n"
+
+
+def test_array_pop(capsys):
+    run_src("let a = [1, 2, 3]; print(pop(a)); print(a);")
+    assert capsys.readouterr().out == "3\n[1, 2]\n"
+
+
+def test_array_pop_empty():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("let a = []; pop(a);")
+
+
+def test_array_push_non_array():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("push(5, 1);")
+
+
+def test_array_index_out_of_range():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("let a = [1, 2]; print(a[5]);")
+
+
+def test_array_negative_index():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("let a = [1, 2]; print(a[-1]);")
+
+
+def test_array_index_non_int():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("let a = [1, 2]; print(a[0.5]);")
+
+
+def test_array_index_non_array():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("let x = 5; print(x[0]);")
+
+
+def test_array_index_set_out_of_range():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("let a = [1]; a[5] = 0;")
+
+
+def test_array_nested(capsys):
+    run_src("let m = [[1, 2], [3, 4]]; print(m[1][0]);")
+    assert capsys.readouterr().out == "3\n"
+
+
+def test_array_type(capsys):
+    run_src("print(type([1]));")
+    assert capsys.readouterr().out == "array\n"
+
+
+def test_array_loop_sum(capsys):
+    run_src(
+        "let a = [1, 2, 3, 4];"
+        "let s = 0; let i = 0;"
+        "while i < len(a) { s = s + a[i]; i = i + 1; }"
+        "print(s);"
+    )
+    assert capsys.readouterr().out == "10\n"

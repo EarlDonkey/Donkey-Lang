@@ -14,6 +14,7 @@ INFX_BP = {
     TokenType.LT:   4, TokenType.LTEQ: 4, TokenType.GT: 4, TokenType.GTEQ: 4,
     TokenType.PLUS: 6, TokenType.MINUS: 6,
     TokenType.STAR: 7, TokenType.SLASH: 7, TokenType.PERCENT: 7,
+    TokenType.DIV: 7,
 }
 
 
@@ -70,13 +71,13 @@ class Parser:
 
         match tok.type:
             case TokenType.NUMBER:
-                return ast.NumberLit(tok.literal, tok.line, tok.col)
+                expr = ast.NumberLit(tok.literal, tok.line, tok.col)
             case TokenType.STRING:
-                return ast.StringLit(tok.literal, tok.line, tok.col)
+                expr = ast.StringLit(tok.literal, tok.line, tok.col)
             case TokenType.TRUE:
-                return ast.BoolLit(True, tok.line, tok.col)
+                expr = ast.BoolLit(True, tok.line, tok.col)
             case TokenType.FALSE:
-                return ast.BoolLit(False, tok.line, tok.col)
+                expr = ast.BoolLit(False, tok.line, tok.col)
             case TokenType.MINUS:
                 return ast.Unary("-", self.parse_expr(8), tok.line, tok.col)
             case TokenType.BANG:
@@ -84,7 +85,15 @@ class Parser:
             case TokenType.LPAREN:
                 inner = self.parse_expr(0)
                 self._expect(TokenType.RPAREN, "')'")
-                return inner
+                expr = inner
+            case TokenType.LBRACKET:
+                elems: list[ast.Expr] = []
+                if not self._check(TokenType.RBRACKET):
+                    elems.append(self.parse_expr(0))
+                    while self._match(TokenType.COMMA):
+                        elems.append(self.parse_expr(0))
+                self._expect(TokenType.RBRACKET, "']'")
+                expr = ast.ArrayLit(elems, tok.line, tok.col)
             case TokenType.IDENT:
                 if self._check(TokenType.LPAREN):
                     self._advance()
@@ -94,10 +103,22 @@ class Parser:
                         while self._match(TokenType.COMMA):
                             args.append(self.parse_expr(0))
                     self._expect(TokenType.RPAREN, "')' after call arguments")
-                    return ast.Call(tok.lexeme, args, tok.line, tok.col)
-                return ast.Ident(tok.lexeme, tok.line, tok.col)
+                    expr = ast.Call(tok.lexeme, args, tok.line, tok.col)
+                else:
+                    expr = ast.Ident(tok.lexeme, tok.line, tok.col)
+            case _:
+                raise ParseError(
+                    f"expected expression, got {tok.type.name}", tok
+                )
 
-        raise ParseError(f"expected expression, got {tok.type.name}", tok)
+        # postfix: index reads, chained (a[0][1])
+        while self._check(TokenType.LBRACKET):
+            self._advance()
+            idx = self.parse_expr(0)
+            self._expect(TokenType.RBRACKET, "']'")
+            expr = ast.Index(expr, idx, expr.line, expr.col)
+
+        return expr
 
     # ---------- statements ----------
 
@@ -182,6 +203,7 @@ class Parser:
         return ast.FnStmt(name.lexeme, params, ret.lexeme, body, tok.line, tok.col)
 
     def parse_expr_stmt(self) -> ast.Stmt:
+        # x = value
         if self._check(TokenType.IDENT) and self._peek_ahead(1).type is TokenType.EQ:
             name_tok = self._advance()
             self._advance()
@@ -189,6 +211,22 @@ class Parser:
             self._expect(TokenType.SEMI, "';' after assignment")
             assign = ast.Assign(name_tok.lexeme, value, name_tok.line, name_tok.col)
             return ast.ExprStmt(assign, name_tok.line, name_tok.col)
+
         expr = self.parse_expr()
+
+        # a[i] = value
+        if isinstance(expr, ast.Index) and self._check(TokenType.EQ):
+            if not isinstance(expr.array, ast.Ident):
+                raise ParseError(
+                    "cannot assign to non-variable array expression",
+                    self._peek(),
+                )
+            self._advance()  # =
+            value = self.parse_expr()
+            self._expect(TokenType.SEMI, "';' after index assignment")
+            return ast.IndexSet(
+                expr.array.name, expr.index, value, expr.line, expr.col
+            )
+
         self._expect(TokenType.SEMI, "';' after expression")
         return ast.ExprStmt(expr, expr.line, expr.col)

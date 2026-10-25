@@ -53,6 +53,10 @@ def is_number(v: object) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def is_int(v: object) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
 def type_name(v: object) -> str:
     if isinstance(v, bool):
         return "bool"
@@ -60,6 +64,8 @@ def type_name(v: object) -> str:
         return "number"
     if isinstance(v, str):
         return "string"
+    if isinstance(v, list):
+        return "array"
     if isinstance(v, (Function, Builtin, CodeObject)):
         return "function"
     return type(v).__name__
@@ -74,4 +80,6 @@ def format_value(v: object) -> str:
         return f"<builtin {v.name}>"
     if isinstance(v, CodeObject):
         return f"<fn {v.name}>"
+    if isinstance(v, list):
+        return "[" + ", ".join(format_value(e) for e in v) + "]"
     return str(v)

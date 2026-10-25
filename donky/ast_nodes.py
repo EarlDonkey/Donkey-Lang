@@ -58,6 +58,19 @@ class Call:
     line: int = 0
     col: int = 0
 
+@dataclass
+class ArrayLit:
+    elems: list[Expr]
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class Index:
+    array: Expr
+    index: Expr
+    line: int = 0
+    col: int = 0
+
 
 # ---------- statements ----------
 
@@ -116,6 +129,14 @@ class Block:
     line: int = 0
     col: int = 0
 
+@dataclass
+class IndexSet:
+    array_name: str
+    index: Expr
+    value: Expr
+    line: int = 0
+    col: int = 0
+
 
 @dataclass
 class Program:
@@ -125,5 +146,7 @@ class Program:
 
 
 # type aliases
-Expr = NumberLit | StringLit | BoolLit | Ident | Binary | Unary | Assign | Call
-Stmt = LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | FnStmt | ReturnStmt | Block
+Expr = (NumberLit | StringLit | BoolLit | Ident | Binary | Unary
+        | Assign | Call | ArrayLit | Index)
+Stmt = (LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | FnStmt
+        | ReturnStmt | Block | IndexSet)

@@ -17,30 +17,32 @@ class TokenType(Enum):
     PRINT = auto()
     TRUE = auto()
     FALSE = auto()
+    DIV = auto()       # integer division keyword
     # operators
     PLUS = auto()
     MINUS = auto()
     STAR = auto()
     SLASH = auto()
-    PERCENT = auto()   # %
-    BANG = auto()      # !
-    AND = auto()       # &&
-    OR = auto()        # ||
-    EQ = auto()        # =
-    EQEQ = auto()      # ==
-    NOTEQ = auto()     # !=
-    LT = auto()        # <
-    LTEQ = auto()      # <=
-    GT = auto()        # >
-    GTEQ = auto()      # >=
+    PERCENT = auto()
+    BANG = auto()
+    AND = auto()
+    OR = auto()
+    EQ = auto()
+    EQEQ = auto()
+    NOTEQ = auto()
+    LT = auto()
+    LTEQ = auto()
+    GT = auto()
+    GTEQ = auto()
     # punctuation
     LPAREN = auto()
     RPAREN = auto()
     LBRACE = auto()
     RBRACE = auto()
+    LBRACKET = auto()
+    RBRACKET = auto()
     SEMI = auto()
     COMMA = auto()
-    # end of input
     EOF = auto()
 
 
@@ -74,13 +76,12 @@ KEYWORDS = {
     "print":  TokenType.PRINT,
     "true":   TokenType.TRUE,
     "false":  TokenType.FALSE,
+    "div":    TokenType.DIV,
 }
 
 
 class Lexer:
     def __init__(self, source: str):
-        # Strip a UTF-8 BOM if present. Windows tools (PowerShell's
-        # `Out-File -Encoding utf8`, Notepad's "UTF-8" save) prepend one.
         if source.startswith("\ufeff"):
             source = source[1:]
         self.source = source
@@ -141,6 +142,7 @@ class Lexer:
             "%": TokenType.PERCENT,
             "(": TokenType.LPAREN, ")": TokenType.RPAREN,
             "{": TokenType.LBRACE, "}": TokenType.RBRACE,
+            "[": TokenType.LBRACKET, "]": TokenType.RBRACKET,
             ";": TokenType.SEMI,   ",": TokenType.COMMA,
         }
         if ch in simple:
@@ -230,7 +232,7 @@ class Lexer:
 if __name__ == "__main__":
     import sys
     path = sys.argv[1] if len(sys.argv) > 1 else "examples/hello.donk"
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:
         src = f.read()
     for tok in Lexer(src).tokenize():
         print(tok)

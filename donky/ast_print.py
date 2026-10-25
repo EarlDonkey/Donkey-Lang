@@ -54,6 +54,19 @@ def show(node, indent: int = 0) -> str:
             if v is None:
                 return f"{pad}Return"
             return f"{pad}Return\n" + show(v, indent + 1)
+        case ast.ArrayLit(elems, _, _):
+            if not elems:
+                return f"{pad}ArrayLit([])"
+            return (f"{pad}ArrayLit\n"
+                    + "\n".join(show(e, indent + 1) for e in elems))
+        case ast.Index(arr, idx, _, _):
+            return (f"{pad}Index\n"
+                    + show(arr, indent + 1) + "\n"
+                    + show(idx, indent + 1))
+        case ast.IndexSet(name, idx, val, _, _):
+            return (f"{pad}IndexSet({name})\n"
+                    + show(idx, indent + 1) + "\n"
+                    + show(val, indent + 1))
 
         case _:
             return f"{pad}?? {node!r}"

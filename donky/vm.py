@@ -2,7 +2,7 @@ from donky.bytecode import CodeObject, Op
 from donky.builtins import install_builtins
 from donky.errors import DonkyRuntimeError
 from donky.values import (
-    Builtin, Environment, format_value, is_number, type_name,
+    Builtin, Environment, format_value, is_int, is_number, type_name,
 )
 
 
@@ -114,6 +114,10 @@ class VM:
                 if r == 0:
                     raise self._err("modulo by zero")
                 self.stack.append(l % r)
+            case Op.FLOOR_DIV:
+                r = self.stack.pop()
+                l = self.stack.pop()
+                self.stack.append(self._floor_div(l, r))
             case Op.NEG:
                 v = self.stack.pop()
                 if not is_number(v):
@@ -169,17 +173,13 @@ class VM:
             case Op.JUMP_IF_FALSE_PEEK:
                 v = self.stack[-1]
                 if not isinstance(v, bool):
-                    raise self._err(
-                        f"'&&' expects bool, got {type_name(v)}"
-                    )
+                    raise self._err(f"'&&' expects bool, got {type_name(v)}")
                 if not v:
                     frame.ip = instr[1]
             case Op.JUMP_IF_TRUE_PEEK:
                 v = self.stack[-1]
                 if not isinstance(v, bool):
-                    raise self._err(
-                        f"'||' expects bool, got {type_name(v)}"
-                    )
+                    raise self._err(f"'||' expects bool, got {type_name(v)}")
                 if v:
                     frame.ip = instr[1]
             case Op.MAKE_FN:
@@ -191,6 +191,22 @@ class VM:
                 self._return(v)
             case Op.PRINT:
                 print(format_value(self.stack.pop()))
+            case Op.NEW_ARRAY:
+                n = instr[1]
+                elems = [self.stack.pop() for _ in range(n)]
+                elems.reverse()
+                self.stack.append(elems)
+            case Op.INDEX_GET:
+                index = self.stack.pop()
+                array = self.stack.pop()
+                self._check_index(array, index)
+                self.stack.append(array[index])
+            case Op.INDEX_SET:
+                value = self.stack.pop()
+                index = self.stack.pop()
+                array = self.stack.pop()
+                self._check_index(array, index)
+                array[index] = value
             case _:
                 raise self._err(f"unknown opcode {op}")
 
@@ -218,6 +234,34 @@ class VM:
             raise self._err(
                 f"'{op}' needs two numbers or two strings, got "
                 f"{type_name(l)} and {type_name(r)}"
+            )
+
+    def _floor_div(self, l: object, r: object) -> object:
+        if not (is_number(l) and is_number(r)):
+            raise self._err(
+                f"'div' needs two numbers, got {type_name(l)} and {type_name(r)}"
+            )
+        if not (is_int(l) and is_int(r)):
+            raise self._err("'div' expects integers, not floats")
+        if r == 0:
+            raise self._err("integer division by zero")
+        q = abs(l) // abs(r)
+        if (l < 0) != (r < 0):
+            return -q
+        return q
+
+    def _check_index(self, array: object, index: object) -> None:
+        if not isinstance(array, list):
+            raise self._err(
+                f"cannot index {type_name(array)}, expected array"
+            )
+        if not is_int(index):
+            raise self._err(
+                f"array index must be integer, got {type_name(index)}"
+            )
+        if index < 0 or index >= len(array):
+            raise self._err(
+                f"index {index} out of range for array of length {len(array)}"
             )
 
     def _call(self, argc: int, name: str) -> None:

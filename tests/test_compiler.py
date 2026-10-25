@@ -141,3 +141,51 @@ def test_unary():
         (Op.NEG,),
         (Op.POP,),
     ]
+    
+def test_div_compiles():
+    code = compile_src("7 div 2;")
+    assert code.instructions == [
+        (Op.CONST, 0),
+        (Op.CONST, 1),
+        (Op.FLOOR_DIV,),
+        (Op.POP,),
+    ]
+
+
+def test_array_lit_compilation():
+    code = compile_src("[1, 2, 3];")
+    assert code.instructions == [
+        (Op.CONST, 0),
+        (Op.CONST, 1),
+        (Op.CONST, 2),
+        (Op.NEW_ARRAY, 3),
+        (Op.POP,),
+    ]
+
+
+def test_empty_array_lit_compilation():
+    code = compile_src("[];")
+    assert code.instructions == [
+        (Op.NEW_ARRAY, 0),
+        (Op.POP,),
+    ]
+
+
+def test_index_get_compilation():
+    code = compile_src("a[0];")
+    assert code.instructions == [
+        (Op.LOAD_GLOBAL, "a"),
+        (Op.CONST, 0),
+        (Op.INDEX_GET,),
+        (Op.POP,),
+    ]
+
+
+def test_index_set_compilation():
+    code = compile_src("a[0] = 5;")
+    assert code.instructions == [
+        (Op.LOAD_GLOBAL, "a"),
+        (Op.CONST, 0),
+        (Op.CONST, 1),
+        (Op.INDEX_SET,),
+    ]

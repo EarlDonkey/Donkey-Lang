@@ -304,3 +304,95 @@ def test_vm_fib10_actually_computes():
     )
     vm.run(code)
     assert vm.globals.get("r") == 55
+
+# ---------- div differential ----------
+
+def test_diff_div():
+    assert assert_same("print(7 div 2);") == "3\n"
+
+
+def test_diff_div_negative():
+    assert_same("print(-7 div 2); print(7 div -2); print(-7 div -2);")
+
+
+def test_diff_err_div_zero():
+    assert_same_error("print(7 div 0);")
+
+
+def test_diff_err_div_float():
+    assert_same_error("print(7.0 div 2);")
+
+
+# ---------- arrays differential ----------
+
+def test_diff_array_literal():
+    assert assert_same("print([1, 2, 3]);") == "[1, 2, 3]\n"
+
+
+def test_diff_array_empty():
+    assert assert_same("print([]);") == "[]\n"
+
+
+def test_diff_array_index():
+    assert_same("let a = [10, 20, 30]; print(a[1]);")
+
+
+def test_diff_array_index_set():
+    assert_same("let a = [1, 2, 3]; a[1] = 99; print(a);")
+
+
+def test_diff_array_len():
+    assert_same("print(len([1, 2, 3]));")
+
+
+def test_diff_array_push():
+    assert_same("let a = [1]; push(a, 2); print(a);")
+
+
+def test_diff_array_pop():
+    assert_same("let a = [1, 2, 3]; print(pop(a)); print(a);")
+
+
+def test_diff_array_loop_sum():
+    assert_same(
+        "let a = [1, 2, 3, 4];"
+        "let s = 0; let i = 0;"
+        "while i < len(a) { s = s + a[i]; i = i + 1; }"
+        "print(s);"
+    )
+
+
+def test_diff_array_nested():
+    assert_same("let m = [[1, 2], [3, 4]]; print(m[1][0]);")
+
+
+def test_diff_array_type():
+    assert_same("print(type([1]));")
+
+
+def test_diff_err_array_out_of_range():
+    assert_same_error("let a = [1, 2]; print(a[5]);")
+
+
+def test_diff_err_negative_index():
+    assert_same_error("let a = [1, 2]; print(a[-1]);")
+
+
+def test_diff_err_index_non_int():
+    assert_same_error("let a = [1, 2]; print(a[0.5]);")
+
+
+def test_diff_err_index_non_array():
+    assert_same_error("let x = 5; print(x[0]);")
+
+
+def test_diff_err_push_non_array():
+    assert_same_error("push(5, 1);")
+
+
+def test_diff_err_pop_empty():
+    assert_same_error("let a = []; pop(a);")
+
+
+def test_diff_err_index_set_oob():
+    assert_same_error("let a = [1]; a[5] = 0;")
