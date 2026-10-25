@@ -440,3 +440,47 @@ def test_array_loop_sum(capsys):
         "print(s);"
     )
     assert capsys.readouterr().out == "10\n"
+    
+# ---------- Session 6: closures (interpreter already supports these) ----------
+
+def test_closure_counter(capsys):
+    run_src(
+        "fn make_counter() -> any {"
+        "  let n = 0;"
+        "  fn inc() -> num { n = n + 1; return n; }"
+        "  return inc;"
+        "}"
+        "let c = make_counter();"
+        "print(c()); print(c()); print(c());"
+    )
+    assert capsys.readouterr().out == "1\n2\n3\n"
+
+
+def test_closure_independent_counters(capsys):
+    run_src(
+        "fn make_counter() -> any {"
+        "  let n = 0;"
+        "  fn inc() -> num { n = n + 1; return n; }"
+        "  return inc;"
+        "}"
+        "let a = make_counter();"
+        "let b = make_counter();"
+        "a(); a();"
+        "print(b()); print(a());"
+    )
+    assert capsys.readouterr().out == "1\n3\n"
+
+
+def test_closure_multi_level(capsys):
+    run_src(
+        "fn outer() -> num {"
+        "  let x = 10;"
+        "  fn middle() -> num {"
+        "    fn inner() -> num { return x + 1; }"
+        "    return inner();"
+        "  }"
+        "  return middle();"
+        "}"
+        "print(outer());"
+    )
+    assert capsys.readouterr().out == "11\n"

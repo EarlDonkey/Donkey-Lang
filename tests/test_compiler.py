@@ -92,7 +92,7 @@ def test_or_short_circuit():
 
 def test_fn_compiles_to_nested():
     code = compile_src("fn f() -> num { return 1; }")
-    assert code.instructions[0][0] == Op.MAKE_FN
+    assert code.instructions[0] == (Op.CLOSURE, 0, 0)
     assert code.instructions[1] == (Op.DEFINE_GLOBAL, "f")
     assert len(code.functions) == 1
     inner = code.functions[0]
@@ -103,6 +103,7 @@ def test_fn_compiles_to_nested():
         (Op.RETURN,),
     ]
     assert inner.constants == [1]
+    assert inner.upvalues == []
 
 
 def test_fn_params_get_slots():
@@ -189,3 +190,63 @@ def test_index_set_compilation():
         (Op.CONST, 1),
         (Op.INDEX_SET,),
     ]
+    
+def test_fn_captures_enclosing_local():
+    src = (
+        "fn outer() -> num {"
+        "  let x = 1;"
+        "  fn inner() -> num { return x; }"
+        "  return inner();"
+        "}"
+    )
+    code = compile_src(src)
+    outer = code.functions[0]
+    inner = outer.functions[0]
+    assert len(inner.upvalues) == 1
+    assert inner.upvalues[0].from_parent_local is True
+    assert inner.upvalues[0].index == 0
+    # outer emits CAPTURE_LOCAL 0 then CLOSURE 0 1
+    assert (Op.CAPTURE_LOCAL, 0) in outer.instructions
+    assert (Op.CLOSURE, 0, 1) in outer.instructions
+
+
+def test_fn_assigns_captured_local_uses_store_upvalue():
+    src = (
+        "fn outer() -> num {"
+        "  let x = 1;"
+        "  fn inner() -> num { x = 2; return x; }"
+        "  return inner();"
+        "}"
+    )
+    code = compile_src(src)
+    inner = code.functions[0].functions[0]
+    ops = [ins[0] for ins in inner.instructions]
+    assert Op.LOAD_UPVALUE in ops
+    assert Op.STORE_UPVALUE in ops
+    assert Op.LOAD_LOCAL not in ops
+    assert Op.STORE_LOCAL not in ops
+
+
+def test_multi_level_capture():
+    src = (
+        "fn outer() -> num {"
+        "  let x = 10;"
+        "  fn middle() -> num {"
+        "    fn inner() -> num { return x; }"
+        "    return inner();"
+        "  }"
+        "  return middle();"
+        "}"
+    )
+    code = compile_src(src)
+    outer = code.functions[0]
+    middle = outer.functions[0]
+    inner = middle.functions[0]
+    # middle captures x from outer's local
+    assert len(middle.upvalues) == 1
+    assert middle.upvalues[0].from_parent_local is True
+    assert middle.upvalues[0].index == 0
+    # inner captures x from middle's upvalue
+    assert len(inner.upvalues) == 1
+    assert inner.upvalues[0].from_parent_local is False
+    assert inner.upvalues[0].index == 0

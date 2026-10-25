@@ -13,6 +13,11 @@ class Op(Enum):
     # locals
     LOAD_LOCAL = auto()
     STORE_LOCAL = auto()
+    # upvalues (closures)
+    LOAD_UPVALUE = auto()     # LOAD_UPVALUE i  → push closure.upvalues[i].value
+    STORE_UPVALUE = auto()    # STORE_UPVALUE i → pop, closure.upvalues[i].value = v
+    CAPTURE_LOCAL = auto()    # CAPTURE_LOCAL slot  → push frame.slots[slot] (the Cell)
+    CAPTURE_UPVALUE = auto()  # CAPTURE_UPVALUE i    → push frame.closure.upvalues[i] (the Cell)
     # globals
     DEFINE_GLOBAL = auto()
     LOAD_GLOBAL = auto()
@@ -40,15 +45,21 @@ class Op(Enum):
     JUMP_IF_FALSE_PEEK = auto()
     JUMP_IF_TRUE_PEEK = auto()
     # functions
-    MAKE_FN = auto()
+    CLOSURE = auto()          # CLOSURE idx, n_upvals → pop n cells, push Closure
     CALL = auto()             # CALL argc name
     RETURN = auto()
     # I/O
     PRINT = auto()
     # arrays
-    NEW_ARRAY = auto()        # NEW_ARRAY n  → pop n values, push list
-    INDEX_GET = auto()        # pop idx, pop arr, push arr[idx]
-    INDEX_SET = auto()        # pop val, pop idx, pop arr, mutate
+    NEW_ARRAY = auto()
+    INDEX_GET = auto()
+    INDEX_SET = auto()
+
+
+@dataclass
+class UpvalueDesc:
+    from_parent_local: bool   # True = capture parent's local slot; False = parent's upvalue
+    index: int
 
 
 @dataclass
@@ -59,6 +70,7 @@ class CodeObject:
     positions: list[tuple[int, int]] = field(default_factory=list)
     constants: list[object] = field(default_factory=list)
     functions: list["CodeObject"] = field(default_factory=list)
+    upvalues: list[UpvalueDesc] = field(default_factory=list)
     slot_count: int = 0
 
     def constant_index(self, value: object) -> int:
@@ -78,6 +90,12 @@ def disassemble(code: CodeObject, name: str | None = None) -> str:
         out.append("-- constants --")
         for i, c in enumerate(code.constants):
             out.append(f"  [{i}] {c!r}")
+
+    if code.upvalues:
+        out.append("-- upvalues --")
+        for i, uv in enumerate(code.upvalues):
+            src = "local" if uv.from_parent_local else "upvalue"
+            out.append(f"  [{i}] {src} {uv.index}")
 
     if code.functions:
         out.append("-- nested functions --")
@@ -117,9 +135,9 @@ def _format_instr(instr: tuple) -> str:
     op = instr[0]
     if op is Op.CALL:
         return f"{op.name:<18} argc={instr[1]} {instr[2]!r}"
-
+    if op is Op.CLOSURE:
+        return f"{op.name:<18} idx={instr[1]} upvals={instr[2]}"
     if len(instr) > 2:
-        # shouldn't happen, but don't crash the disassembler if it does
         return f"{op.name:<18} {instr[1:]!r}"
 
     arg = instr[1]

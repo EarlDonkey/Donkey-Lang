@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from donky import ast_nodes as ast
@@ -49,6 +49,24 @@ class Builtin:
     impl: Callable[[list[object]], object]
 
 
+class Cell:
+    """Mutable box for a single runtime value. Shared by closures so
+    mutations through any closure are visible to all."""
+    __slots__ = ("value",)
+
+    def __init__(self, value: object = None):
+        self.value = value
+
+    def __repr__(self) -> str:
+        return f"Cell({self.value!r})"
+
+
+@dataclass
+class Closure:
+    code: CodeObject
+    upvalues: list[Cell] = field(default_factory=list)
+
+
 def is_number(v: object) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
@@ -66,7 +84,7 @@ def type_name(v: object) -> str:
         return "string"
     if isinstance(v, list):
         return "array"
-    if isinstance(v, (Function, Builtin, CodeObject)):
+    if isinstance(v, (Function, Builtin, Closure, CodeObject)):
         return "function"
     return type(v).__name__
 
@@ -78,6 +96,8 @@ def format_value(v: object) -> str:
         return f"<fn {v.name}>"
     if isinstance(v, Builtin):
         return f"<builtin {v.name}>"
+    if isinstance(v, Closure):
+        return f"<fn {v.code.name}>"
     if isinstance(v, CodeObject):
         return f"<fn {v.name}>"
     if isinstance(v, list):

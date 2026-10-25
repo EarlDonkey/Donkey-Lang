@@ -2,17 +2,19 @@ from donky.bytecode import CodeObject, Op
 from donky.builtins import install_builtins
 from donky.errors import DonkyRuntimeError
 from donky.values import (
-    Builtin, Environment, format_value, is_int, is_number, type_name,
+    Builtin, Cell, Closure, Environment, format_value, is_int, is_number,
+    type_name,
 )
 
 
 class Frame:
-    __slots__ = ("code", "ip", "slots")
+    __slots__ = ("code", "ip", "slots", "closure")
 
-    def __init__(self, code: CodeObject):
+    def __init__(self, code: CodeObject, closure: Closure | None = None):
         self.code = code
         self.ip = 0
-        self.slots: list[object] = [None] * code.slot_count
+        self.slots: list[Cell] = [Cell() for _ in range(code.slot_count)]
+        self.closure = closure
 
 
 class VM:
@@ -24,7 +26,7 @@ class VM:
         self.position: tuple[int, int] = (0, 0)
 
     def run(self, code: CodeObject) -> None:
-        self.frames = [Frame(code)]
+        self.frames = [Frame(code, None)]
         self.stack = []
         self.position = (0, 0)
         self._execute()
@@ -69,9 +71,17 @@ class VM:
             case Op.POP:
                 self.stack.pop()
             case Op.LOAD_LOCAL:
-                self.stack.append(frame.slots[instr[1]])
+                self.stack.append(frame.slots[instr[1]].value)
             case Op.STORE_LOCAL:
-                frame.slots[instr[1]] = self.stack.pop()
+                frame.slots[instr[1]].value = self.stack.pop()
+            case Op.LOAD_UPVALUE:
+                self.stack.append(frame.closure.upvalues[instr[1]].value)
+            case Op.STORE_UPVALUE:
+                frame.closure.upvalues[instr[1]].value = self.stack.pop()
+            case Op.CAPTURE_LOCAL:
+                self.stack.append(frame.slots[instr[1]])
+            case Op.CAPTURE_UPVALUE:
+                self.stack.append(frame.closure.upvalues[instr[1]])
             case Op.DEFINE_GLOBAL:
                 self.globals.define(instr[1], self.stack.pop())
             case Op.LOAD_GLOBAL:
@@ -182,8 +192,12 @@ class VM:
                     raise self._err(f"'||' expects bool, got {type_name(v)}")
                 if v:
                     frame.ip = instr[1]
-            case Op.MAKE_FN:
-                self.stack.append(frame.code.functions[instr[1]])
+            case Op.CLOSURE:
+                fn_idx = instr[1]
+                n_upvals = instr[2]
+                cells = [self.stack.pop() for _ in range(n_upvals)]
+                cells.reverse()
+                self.stack.append(Closure(frame.code.functions[fn_idx], cells))
             case Op.CALL:
                 self._call(instr[1], instr[2])
             case Op.RETURN:
@@ -283,15 +297,26 @@ class VM:
                 raise
             self.stack.append(result)
 
+        elif isinstance(callee, Closure):
+            if len(args) != callee.code.arity:
+                raise self._err(
+                    f"{callee.code.name}() expects {callee.code.arity} "
+                    f"argument(s), got {len(args)}"
+                )
+            new_frame = Frame(callee.code, callee)
+            for i, a in enumerate(args):
+                new_frame.slots[i].value = a
+            self.frames.append(new_frame)
+
         elif isinstance(callee, CodeObject):
             if len(args) != callee.arity:
                 raise self._err(
                     f"{callee.name}() expects {callee.arity} "
                     f"argument(s), got {len(args)}"
                 )
-            new_frame = Frame(callee)
+            new_frame = Frame(callee, Closure(callee, []))
             for i, a in enumerate(args):
-                new_frame.slots[i] = a
+                new_frame.slots[i].value = a
             self.frames.append(new_frame)
 
         else:

@@ -396,3 +396,73 @@ def test_diff_err_pop_empty():
 
 def test_diff_err_index_set_oob():
     assert_same_error("let a = [1]; a[5] = 0;")
+
+# ---------- Session 6: closures ----------
+
+def test_diff_closure_counter():
+    src = (
+        "fn make_counter() -> any {"
+        "  let n = 0;"
+        "  fn inc() -> num { n = n + 1; return n; }"
+        "  return inc;"
+        "}"
+        "let c = make_counter();"
+        "print(c()); print(c()); print(c());"
+    )
+    assert assert_same(src) == "1\n2\n3\n"
+
+
+def test_diff_closure_independent():
+    src = (
+        "fn make_counter() -> any {"
+        "  let n = 0;"
+        "  fn inc() -> num { n = n + 1; return n; }"
+        "  return inc;"
+        "}"
+        "let a = make_counter();"
+        "let b = make_counter();"
+        "a(); a();"
+        "print(b()); print(a());"
+    )
+    assert assert_same(src) == "1\n3\n"
+
+
+def test_diff_closure_multi_level():
+    src = (
+        "fn outer() -> num {"
+        "  let x = 10;"
+        "  fn middle() -> num {"
+        "    fn inner() -> num { return x + 1; }"
+        "    return inner();"
+        "  }"
+        "  return middle();"
+        "}"
+        "print(outer());"
+    )
+    assert assert_same(src) == "11\n"
+
+
+def test_diff_closure_captures_by_reference():
+    src = (
+        "fn f() -> num {"
+        "  let x = 1;"
+        "  fn get() -> num { return x; }"
+        "  x = 42;"
+        "  return get();"
+        "}"
+        "print(f());"
+    )
+    assert assert_same(src) == "42\n"
+
+
+def test_diff_closure_survives_frame():
+    src = (
+        "fn make() -> any {"
+        "  let n = 100;"
+        "  fn f() -> num { return n; }"
+        "  return f;"
+        "}"
+        "let g = make();"
+        "print(g());"
+    )
+    assert assert_same(src) == "100\n"

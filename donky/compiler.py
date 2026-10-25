@@ -1,5 +1,7 @@
+from dataclasses import dataclass
+
 from donky import ast_nodes as ast
-from donky.bytecode import CodeObject, Op
+from donky.bytecode import CodeObject, Op, UpvalueDesc
 from donky.errors import DonkyRuntimeError
 
 
@@ -22,12 +24,28 @@ BIN_OP_MAP = {
 }
 
 
+@dataclass
+class CompileContext:
+    code: CodeObject
+    scopes: list[dict[str, int]]
+    slot_counter: int
+
+
 class Compiler:
+    """Compiles a Donky Program into a CodeObject with closures.
+
+    Upvalue resolution: when a function references a name that isn't
+    local, it walks the enclosing-function chain. The variable becomes
+    an upvalue of the current function, captured from either an
+    enclosing local or an enclosing upvalue. Globals are the fallback.
+    """
+
     def __init__(self) -> None:
         self.code = CodeObject(name="<main>", arity=0)
         self.scopes: list[dict[str, int]] = []
         self.slot_counter = 0
         self.position: tuple[int, int] = (0, 0)
+        self.enclosing: list[CompileContext] = []
 
     def compile(self, program: ast.Program) -> CodeObject:
         for stmt in program.stmts:
@@ -46,17 +64,52 @@ class Compiler:
     def _at_global_scope(self) -> bool:
         return len(self.scopes) == 0
 
-    def _resolve(self, name: str) -> tuple[str, int | None]:
-        for scope in reversed(self.scopes):
+    def _resolve_local_in(self, scopes: list[dict[str, int]],
+                          name: str) -> int | None:
+        for scope in reversed(scopes):
             if name in scope:
-                return ("local", scope[name])
-        return ("global", None)
+                return scope[name]
+        return None
 
     def _declare_local(self, name: str) -> int:
         slot = self.slot_counter
         self.slot_counter += 1
         self.scopes[-1][name] = slot
         return slot
+
+    # ---------- upvalues ----------
+
+    def _add_upvalue(self, code: CodeObject,
+                     from_parent_local: bool, index: int) -> int:
+        for i, uv in enumerate(code.upvalues):
+            if uv.from_parent_local == from_parent_local and uv.index == index:
+                return i
+        code.upvalues.append(UpvalueDesc(from_parent_local, index))
+        return len(code.upvalues) - 1
+
+    def _resolve_upvalue_at(self, name: str, code: CodeObject,
+                            enclosing: list[CompileContext]) -> int | None:
+        """Resolve `name` as an upvalue of `code`. `enclosing` is the chain
+        of ancestor contexts, outermost first."""
+        if not enclosing:
+            return None
+        parent = enclosing[-1]
+        slot = self._resolve_local_in(parent.scopes, name)
+        if slot is not None:
+            return self._add_upvalue(code, True, slot)
+        parent_idx = self._resolve_upvalue_at(name, parent.code, enclosing[:-1])
+        if parent_idx is not None:
+            return self._add_upvalue(code, False, parent_idx)
+        return None
+
+    def _resolve(self, name: str) -> tuple[str, int | None]:
+        slot = self._resolve_local_in(self.scopes, name)
+        if slot is not None:
+            return ("local", slot)
+        idx = self._resolve_upvalue_at(name, self.code, self.enclosing)
+        if idx is not None:
+            return ("upvalue", idx)
+        return ("global", None)
 
     # ---------- emit helpers ----------
 
@@ -82,9 +135,11 @@ class Compiler:
     # ---------- name load/store ----------
 
     def _load_name(self, name: str) -> None:
-        kind, slot = self._resolve(name)
+        kind, idx = self._resolve(name)
         if kind == "local":
-            self._emit(Op.LOAD_LOCAL, slot)
+            self._emit(Op.LOAD_LOCAL, idx)
+        elif kind == "upvalue":
+            self._emit(Op.LOAD_UPVALUE, idx)
         else:
             self._emit(Op.LOAD_GLOBAL, name)
 
@@ -96,9 +151,11 @@ class Compiler:
             self._emit(Op.STORE_LOCAL, slot)
 
     def _store_existing(self, name: str) -> None:
-        kind, slot = self._resolve(name)
+        kind, idx = self._resolve(name)
         if kind == "local":
-            self._emit(Op.STORE_LOCAL, slot)
+            self._emit(Op.STORE_LOCAL, idx)
+        elif kind == "upvalue":
+            self._emit(Op.STORE_UPVALUE, idx)
         else:
             self._emit(Op.STORE_GLOBAL, name)
 
@@ -127,9 +184,14 @@ class Compiler:
                 self._compile_while(cond, body)
             case ast.FnStmt(name, params, ret, body, line, col):
                 fn_code = self._compile_function(name, params, body)
-                idx = len(self.code.functions)
+                fn_idx = len(self.code.functions)
                 self.code.functions.append(fn_code)
-                self._emit(Op.MAKE_FN, idx)
+                for uv in fn_code.upvalues:
+                    if uv.from_parent_local:
+                        self._emit(Op.CAPTURE_LOCAL, uv.index)
+                    else:
+                        self._emit(Op.CAPTURE_UPVALUE, uv.index)
+                self._emit(Op.CLOSURE, fn_idx, len(fn_code.upvalues))
                 self._declare_name(name)
             case ast.ReturnStmt(value, line, col):
                 if self.code.name == "<main>":
@@ -193,32 +255,36 @@ class Compiler:
         saved_slots = self.slot_counter
         saved_position = self.position
 
+        self.enclosing.append(
+            CompileContext(saved_code, saved_scopes, saved_slots)
+        )
         fn_code = CodeObject(name=name, arity=len(params))
         self.code = fn_code
         self.scopes = []
         self.slot_counter = 0
 
-        self._push_scope()
         try:
-            for p in params:
-                self._declare_local(p)
-            for s in body.stmts:
-                self.compile_stmt(s)
-            if (
-                not self.code.instructions
-                or self.code.instructions[-1][0] != Op.RETURN
-            ):
-                self._emit(Op.CONST, fn_code.constant_index(None))
-                self._emit(Op.RETURN)
+            self._push_scope()
+            try:
+                for p in params:
+                    self._declare_local(p)
+                for s in body.stmts:
+                    self.compile_stmt(s)
+                if (
+                    not self.code.instructions
+                    or self.code.instructions[-1][0] != Op.RETURN
+                ):
+                    self._emit(Op.CONST, fn_code.constant_index(None))
+                    self._emit(Op.RETURN)
+            finally:
+                self._pop_scope()
+            fn_code.slot_count = self.slot_counter
         finally:
-            self._pop_scope()
-
-        fn_code.slot_count = self.slot_counter
-
-        self.code = saved_code
-        self.scopes = saved_scopes
-        self.slot_counter = saved_slots
-        self.position = saved_position
+            self.enclosing.pop()
+            self.code = saved_code
+            self.scopes = saved_scopes
+            self.slot_counter = saved_slots
+            self.position = saved_position
 
         return fn_code
 
