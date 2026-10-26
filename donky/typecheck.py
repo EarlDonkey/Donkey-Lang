@@ -49,6 +49,13 @@ BUILTIN_RETURNS = {
     "ws_write":  TYPE_ANY,
     "to_json": TYPE_STRING,
     "from_json": TYPE_ANY,
+    "dns_lookup":  TYPE_STRING,
+    "tcp_connect": TYPE_BOOL,
+    "ip_to_list":  TYPE_ARRAY,
+    "get_mac":     TYPE_STRING,
+    "sleep":       TYPE_ANY,
+    "time":        TYPE_NUMBER,
+    "get_local_ip": TYPE_STRING,
 }
 
 

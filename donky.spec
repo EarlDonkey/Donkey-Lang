@@ -8,6 +8,7 @@ a = Analysis(
     datas=[
         ('examples', 'examples'),
         ('lib', 'lib'),
+        ('compiler', 'compiler'),
     ],
     hiddenimports=[],
     hookspath=[],
@@ -28,6 +29,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
+    icon='donky.ico',
 )
 
 coll = COLLECT(

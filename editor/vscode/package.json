@@ -3,7 +3,11 @@
   "displayName": "Donky",
   "description": "Syntax highlighting and language support for Donky",
   "version": "0.2.0",
-  "publisher": "Earl Donkey",
+  "publisher": "EarlDonkey",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EarlDonkey/Donky-Lang.git"
+  },
   "icon": "icons/donky-extension.png",
   "engines": { "vscode": "^1.75.0" },
   "categories": ["Programming Languages"],

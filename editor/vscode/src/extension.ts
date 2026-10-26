@@ -62,23 +62,32 @@ function resolveServerScript(
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const script = resolveServerScript(context);
-  if (!script) {
-    vscode.window.showErrorMessage(
-      "Donky: cannot find donky_lsp.py. Looked in ../lsp and ./lsp relative to the extension."
-    );
-    return;
-  }
-
-  const python = resolvePython(context);
   const output = vscode.window.createOutputChannel("Donky Language Server");
-  output.appendLine(`python:  ${python}`);
-  output.appendLine(`server:  ${script}`);
+  let serverOptions: ServerOptions | undefined;
 
-  const serverOptions: ServerOptions = {
-    run: { command: python, args: [script], transport: TransportKind.stdio },
-    debug: { command: python, args: [script], transport: TransportKind.stdio },
-  };
+  const exePath = path.join(context.extensionPath, "donky_lsp.exe");
+  
+  if (fs.existsSync(exePath)) {
+    output.appendLine(`Found standalone executable: ${exePath}`);
+    serverOptions = {
+      run: { command: exePath, args: [], transport: TransportKind.stdio },
+      debug: { command: exePath, args: [], transport: TransportKind.stdio },
+    };
+  } else {
+    output.appendLine("Executable not found, falling back to Python...");
+    const script = resolveServerScript(context);
+    if (!script) {
+      vscode.window.showErrorMessage("Donky: cannot find donky_lsp.exe or donky_lsp.py.");
+      return;
+    }
+    const python = resolvePython(context);
+    output.appendLine(`python:  ${python}`);
+    output.appendLine(`server:  ${script}`);
+    serverOptions = {
+      run: { command: python, args: [script], transport: TransportKind.stdio },
+      debug: { command: python, args: [script], transport: TransportKind.stdio },
+    };
+  }
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "donky" }],

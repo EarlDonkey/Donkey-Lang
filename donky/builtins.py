@@ -3,6 +3,9 @@ import itertools
 import threading
 import urllib.parse
 import json
+import time as py_time
+import ipaddress
+import subprocess
 
 from donky.errors import DonkyRuntimeError
 from donky.values import (
@@ -238,6 +241,80 @@ def _tcp_close(args: list[object]) -> object:
         except Exception: pass
     return None
 
+def _tcp_connect(args: list[object]) -> object:
+    ip = args[0]
+    port = args[1]
+    timeout = args[2] if len(args) > 2 else 1.0
+    if not isinstance(ip, str) or not isinstance(port, int):
+        raise DonkyRuntimeError("tcp_connect() expects (ip_str, port_int, [timeout_float])")
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        result = s.connect_ex((ip, port))
+        s.close()
+        return result == 0 # Returns true if open
+    except Exception:
+        return False
+
+def _sleep(args: list[object]) -> object:
+    sec = args[0]
+    if not isinstance(sec, (int, float)):
+        raise DonkyRuntimeError("sleep() expects a number")
+    py_time.sleep(sec)
+    return None
+
+def _time(args: list[object]) -> object:
+    return py_time.time()
+
+def _ip_to_list(args: list[object]) -> object:
+    cidr = args[0]
+    if not isinstance(cidr, str):
+        raise DonkyRuntimeError("ip_to_list() expects a string CIDR")
+    try:
+        net = ipaddress.ip_network(cidr, strict=False)
+        # .hosts() excludes network and broadcast addresses automatically
+        return [str(ip) for ip in net.hosts()]
+    except Exception as e:
+        raise DonkyRuntimeError(f"ip_to_list() failed: {e}")
+
+def _get_mac(args: list[object]) -> object:
+    ip = args[0]
+    if not isinstance(ip, str):
+        raise DonkyRuntimeError("get_mac() expects string IP")
+    try:
+        # Runs the Windows ARP command and parses the output
+        output = subprocess.check_output(["arp", "-a", ip], text=True, errors="ignore")
+        for line in output.splitlines():
+            if ip in line:
+                parts = line.split()
+                for part in parts:
+                    # Look for standard MAC formats (XX-XX-XX-XX-XX-XX or XX:XX:XX:XX:XX:XX)
+                    if len(part) == 17 and (part.count('-') == 5 or part.count(':') == 5):
+                        return part.replace(":", "-")
+        return "Unknown"
+    except Exception:
+        return "Unknown"
+
+def _get_local_ip(args: list[object]) -> object:
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        return ip
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+def _dns_lookup(args: list[object]) -> object:
+    ip = args[0]
+    if not isinstance(ip, str):
+        raise DonkyRuntimeError("dns_lookup() expects string IP")
+    try:
+        return socket.gethostbyaddr(ip)[0]
+    except Exception:
+        return "Unknown"
+
 def _url_decode(args: list[object]) -> object:
     s = args[0]
     if not isinstance(s, str):
@@ -360,6 +437,14 @@ BUILTINS = [
     ("ws_accept", 2, _ws_accept, 2),
     ("ws_read",   1, _ws_read,   1),
     ("ws_write",  2, _ws_write,  2),
+    ("tcp_connect", 2, _tcp_connect, 3),
+    ("get_local_ip", 0, _get_local_ip, 0),
+    ("dns_lookup", 1, _dns_lookup, 1),
+    ("sleep",      1, _sleep,        1),
+    ("time",       0, _time,         0),
+    ("ip_to_list", 1, _ip_to_list,   1),
+    ("get_mac",    1, _get_mac,      1),
+    
 ]
 
 def install_builtins(env: Environment, args: list[str] | None = None) -> None:

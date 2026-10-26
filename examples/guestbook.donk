@@ -122,3 +122,5 @@ while true {
     let client = tcp_accept(server);
     spawn(fn() -> void { handle_client(client); });
 }
+
+print(nope);

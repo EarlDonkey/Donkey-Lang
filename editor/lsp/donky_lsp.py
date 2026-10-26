@@ -65,6 +65,13 @@ BUILTINS = {
     "tcp_read":   "fn tcp_read(client_id: number, max_bytes?: number) -> string",
     "tcp_write":  "fn tcp_write(client_id: number, data: string) -> void",
     "tcp_close":  "fn tcp_close(socket_id: number) -> void",
+    "dns_lookup": "fn dns_lookup(ip: string) -> string",
+    "tcp_connect": "fn tcp_connect(ip: string, port: number, timeout?: number) -> bool",
+    "ip_to_list": "fn ip_to_list(cidr: string) -> array",
+    "get_mac": "fn get_mac(ip: string) -> string",
+    "sleep": "fn sleep(seconds: number) -> void",
+    "time": "fn time() -> number",
+    "get_local_ip": "fn get_local_ip() -> string",
 }
 
 # ---------------------------------------------------------------- helpers

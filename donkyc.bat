@@ -1,2 +1,2 @@
 @echo off
-donky "%~dp0compiler\donkyc.donk" %*
+"%~dp0donky.exe" "%~dp0compiler\donkyc.donk" %*

@@ -1,0 +1,102 @@
+import "../lib/strings.donk";
+import "../lib/format.donk";
+
+let target_cidr = get_local_ip();
+let parts = split(target_cidr, ".");
+target_cidr = parts[0] + "." + parts[1] + "." + parts[2] + ".0/24";
+
+if len(args) > 0 {
+    target_cidr = args[0];
+}
+
+print("=== Donky Network Mapper ===");
+print("Target Scope: ${target_cidr}");
+
+let ips = ip_to_list(target_cidr);
+print("Discovered ${len(ips)} hosts to scan.");
+
+let critical_ports = [21, 22, 23, 80, 443, 445, 3389, 8080];
+let inventory = {};
+let start_time = time();
+
+fn scan_host(ip) -> void {
+    let open_ports = [];
+    let is_alive = false;
+    
+    // Check ports
+    for port in critical_ports {
+        let is_open = tcp_connect(ip, port, 0.3);
+        if is_open {
+            is_alive = true;
+            push(open_ports, port);
+        }
+    }
+    
+    if is_alive {
+        let mac = get_mac(ip);
+        let hostname = dns_lookup(ip);
+        
+        // Thread-safe-ish mutation (Python GIL handles dict assignment)
+        inventory[ip] = {
+            "ip": ip,
+            "mac": mac,
+            "hostname": hostname,
+            "ports": open_ports
+        };
+    }
+}
+
+print("\nStarting multithreaded scan...");
+// Fire off a thread for every single IP in the /24
+for ip in ips {
+    spawn(fn() -> void { scan_host(ip); });
+}
+
+// Give the threads time to finish (tcp_connect timeouts * number of ports)
+print("Waiting for threads to complete...");
+sleep(3.0);
+
+let end_time = time();
+let duration = end_time - start_time;
+
+print("\nScan complete in ${format_num(duration, 2)} seconds.");
+print("Found ${len(inventory)} active devices.");
+
+// --- Generate HTML Report ---
+let cards_html = "";
+
+for ip in keys(inventory) {
+    let node = inventory[ip];
+    let port_badges = "";
+    
+    for p in node["ports"] {
+        port_badges = port_badges + "<span class='badge'>" + str(p) + "</span>";
+    }
+    
+    cards_html = cards_html + "<div class='card'>";
+    cards_html = cards_html + "<div class='header'><span class='dot'></span><h2>" + node["ip"] + "</h2></div>";
+    cards_html = cards_html + "<p><strong>Hostname:</strong> " + node["hostname"] + "</p>";
+    cards_html = cards_html + "<p><strong>MAC Address:</strong> " + node["mac"] + "</p>";
+    cards_html = cards_html + "<div class='ports'>" + port_badges + "</div>";
+    cards_html = cards_html + "</div>";
+}
+
+let html = "<html><head><style>";
+html = html + "body { background: #0f172a; color: #cbd5e1; font-family: 'Segoe UI', sans-serif; padding: 40px; }";
+html = html + "h1 { color: #38bdf8; text-align: center; }";
+html = html + ".grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }";
+html = html + ".card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 20px; }";
+html = html + ".card:hover { border-color: #38bdf8; }";
+html = html + ".header { display: flex; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 15px; }";
+html = html + ".dot { width: 12px; height: 12px; background: #10b981; border-radius: 50%; margin-right: 10px; box-shadow: 0 0 10px #10b981; }";
+html = html + "h2 { margin: 0; font-size: 1.2em; color: white; font-family: monospace; }";
+html = html + "p { margin: 5px 0; font-size: 0.9em; }";
+html = html + ".badge { background: #0369a1; color: white; padding: 4px 8px; border-radius: 4px; font-family: monospace; margin-right: 5px; display: inline-block; font-size: 0.8em; }";
+html = html + "</style></head><body>";
+html = html + "<h1>Donky Network Topology</h1>";
+html = html + "<p style='text-align:center'>Scanned " + target_cidr + " in " + format_num(duration, 2) + " seconds</p>";
+html = html + "<div class='grid'>" + cards_html + "</div>";
+html = html + "</body></html>";
+
+write_file("donky_scan.html", html);
+print("Report generated: donky_scan.html");

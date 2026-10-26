@@ -1,5 +1,28 @@
-.venv/
+# Python
 __pycache__/
 *.pyc
+.venv/
 .pytest_cache/
-*.db
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# Node / VS Code
+node_modules/
+out/
+*.vsix
+.vscode/
+
+# Inno Setup
+installer_output/
+
+# Generated files
+compiled.json
+*.donk.json
+donky_scan.html
+network_audit.csv
+Donky-v*.zip
+*.exe
+*.ico
