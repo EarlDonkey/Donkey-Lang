@@ -726,3 +726,17 @@ def test_diff_else_if_fallthrough():
         'else { print("other"); }'
     )
     assert assert_same(src) == "other\n"
+
+def test_diff_import(tmp_path):
+    (tmp_path / "lib.donk").write_text(
+        "fn double(n) -> num { return n * 2; }", encoding="utf-8"
+    )
+    from donky import modules
+    src = 'import "lib.donk"; print(double(5));'
+    prog = Parser(Lexer(src).tokenize()).parse()
+    prog = modules.expand(prog, str(tmp_path))
+    code = Compiler().compile(prog)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        VM().run(code)
+    assert buf.getvalue() == "10\n"

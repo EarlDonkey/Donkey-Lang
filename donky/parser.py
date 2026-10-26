@@ -23,6 +23,7 @@ class Parser:
         self.tokens = tokens
         self.pos = 0
         self.loop_depth = 0
+        self.block_depth = 0
 
     def _peek(self) -> Token:
         return self.tokens[self.pos]
@@ -50,8 +51,6 @@ class Parser:
             return self._advance()
         tok = self._peek()
         raise ParseError(f"expected {what}, got {tok.type.name} ({tok.lexeme!r})", tok)
-
-    # ---------- expressions ----------
 
     def parse_expr(self, min_bp: int = 0) -> ast.Expr:
         left = self.parse_prefix()
@@ -130,8 +129,6 @@ class Parser:
 
         return expr
 
-    # ---------- statements ----------
-
     def parse(self) -> ast.Program:
         stmts: list[ast.Stmt] = []
         while not self._check(TokenType.EOF):
@@ -151,16 +148,29 @@ class Parser:
         if self._check(TokenType.CONTINUE): return self.parse_continue()
         if self._check(TokenType.TRY):      return self.parse_try()
         if self._check(TokenType.THROW):    return self.parse_throw()
+        if self._check(TokenType.IMPORT):   return self.parse_import()
         if self._check(TokenType.LBRACE):   return self.parse_block()
         return self.parse_expr_stmt()
 
     def parse_block(self) -> ast.Block:
         tok = self._expect(TokenType.LBRACE, "'{'")
+        self.block_depth += 1
         stmts: list[ast.Stmt] = []
-        while not self._check(TokenType.RBRACE) and not self._check(TokenType.EOF):
-            stmts.append(self.parse_statement())
+        try:
+            while not self._check(TokenType.RBRACE) and not self._check(TokenType.EOF):
+                stmts.append(self.parse_statement())
+        finally:
+            self.block_depth -= 1
         self._expect(TokenType.RBRACE, "'}'")
         return ast.Block(stmts, tok.line, tok.col)
+
+    def parse_import(self) -> ast.ImportStmt:
+        tok = self._advance()
+        if self.block_depth > 0:
+            raise ParseError("'import' must be at top level", tok)
+        path = self._expect(TokenType.STRING, "string path after 'import'")
+        self._expect(TokenType.SEMI, "';' after import")
+        return ast.ImportStmt(path.literal, tok.line, tok.col)
 
     def parse_let(self) -> ast.LetStmt:
         tok = self._advance()
@@ -208,11 +218,7 @@ class Parser:
 
     def parse_try(self) -> ast.TryStmt:
         tok = self._advance()
-        self._push_loop_saved = self.loop_depth
-        try:
-            body = self.parse_block()
-        finally:
-            self.loop_depth = self._push_loop_saved
+        body = self.parse_block()
         self._expect(TokenType.CATCH, "'catch' after try block")
         err_name = self._expect(TokenType.IDENT, "error variable name")
         handler = self.parse_block()

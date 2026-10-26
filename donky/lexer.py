@@ -23,6 +23,7 @@ class TokenType(Enum):
     TRY = auto()
     CATCH = auto()
     THROW = auto()
+    IMPORT = auto()
     PLUS = auto()
     MINUS = auto()
     STAR = auto()
@@ -88,6 +89,7 @@ KEYWORDS = {
     "try":      TokenType.TRY,
     "catch":    TokenType.CATCH,
     "throw":    TokenType.THROW,
+    "import":   TokenType.IMPORT,
 }
 
 

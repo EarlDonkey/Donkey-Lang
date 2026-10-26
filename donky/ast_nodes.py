@@ -162,6 +162,12 @@ class ThrowStmt:
     col: int = 0
 
 @dataclass
+class ImportStmt:
+    path: str
+    line: int = 0
+    col: int = 0
+
+@dataclass
 class Block:
     stmts: list[Stmt]
     line: int = 0
@@ -187,4 +193,4 @@ Expr = (NumberLit | StringLit | BoolLit | Ident | Binary | Unary
         | Assign | Call | ArrayLit | MapLit | Index)
 Stmt = (LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | ForStmt
         | FnStmt | ReturnStmt | Block | IndexSet | BreakStmt | ContinueStmt
-        | TryStmt | ThrowStmt)
+        | TryStmt | ThrowStmt | ImportStmt)

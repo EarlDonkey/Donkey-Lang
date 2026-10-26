@@ -166,3 +166,6 @@ def test_throw_keyword():
 
 def test_colon_token():
     assert types(":")[0] == TokenType.COLON
+
+def test_import_keyword():
+    assert types("import")[0] == TokenType.IMPORT

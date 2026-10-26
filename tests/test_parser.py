@@ -217,3 +217,13 @@ def test_else_if_chain_parses():
     assert isinstance(nested.else_, ast.Block)
     assert isinstance(nested.else_.stmts[0], ast.IfStmt)
     assert nested.else_.stmts[0].else_ is not None
+
+def test_import_parses():
+    p = parse_program('import "foo.donk";')
+    assert isinstance(p.stmts[0], ast.ImportStmt)
+    assert p.stmts[0].path == "foo.donk"
+
+
+def test_import_nested_errors():
+    with pytest.raises(ParseError):
+        parse_program('if true { import "x.donk"; }')

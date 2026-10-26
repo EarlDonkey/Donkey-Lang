@@ -836,3 +836,16 @@ def test_else_if_fallthrough(capsys):
         'else { print("other"); }'
     )
     assert capsys.readouterr().out == "other\n"
+
+def test_import_function(tmp_path, capsys):
+    (tmp_path / "lib.donk").write_text(
+        "fn double(n) -> num { return n * 2; }", encoding="utf-8"
+    )
+    import os
+    from donky import modules
+    from donky.interpreter import Interpreter
+    src = 'import "lib.donk"; print(double(5));'
+    prog = Parser(Lexer(src).tokenize()).parse()
+    prog = modules.expand(prog, str(tmp_path))
+    Interpreter().run(prog)
+    assert capsys.readouterr().out == "10\n"

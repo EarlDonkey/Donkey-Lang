@@ -85,5 +85,7 @@ def show(node, indent: int = 0) -> str:
                     + show(handler, indent + 1))
         case ast.ThrowStmt(value):
             return f"{pad}Throw\n" + show(value, indent + 1)
+        case ast.ImportStmt(path):
+            return f"{pad}Import({path!r})"
         case _:
             return f"{pad}?? {node!r}"

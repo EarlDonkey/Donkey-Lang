@@ -1,5 +1,7 @@
+import os
 import sys
 
+from donky import modules
 from donky.bytecode import disassemble
 from donky.compiler import CompileError, Compiler
 from donky.errors import DonkyRuntimeError
@@ -16,21 +18,15 @@ def main() -> None:
         print(f"donky: cannot read {path}: {e}", file=sys.stderr)
         sys.exit(2)
 
+    base_dir = os.path.dirname(os.path.abspath(path))
+
     try:
         toks = Lexer(src).tokenize()
         prog = Parser(toks).parse()
+        prog = modules.expand(prog, base_dir)
         code = Compiler().compile(prog)
         print(disassemble(code))
-    except LexError as e:
-        print(f"{path}: {e}", file=sys.stderr)
-        sys.exit(1)
-    except ParseError as e:
-        print(f"{path}: {e}", file=sys.stderr)
-        sys.exit(1)
-    except CompileError as e:
-        print(f"{path}: {e}", file=sys.stderr)
-        sys.exit(1)
-    except DonkyRuntimeError as e:
+    except (LexError, ParseError, CompileError, DonkyRuntimeError) as e:
         print(f"{path}: {e}", file=sys.stderr)
         sys.exit(1)
 
