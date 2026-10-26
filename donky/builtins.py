@@ -3,6 +3,8 @@ import itertools
 import threading
 import urllib.parse
 import urllib.request
+import hashlib
+import base64
 
 from donky.errors import DonkyRuntimeError
 from donky.values import (
@@ -226,6 +228,62 @@ def _tcp_close(args: list[object]) -> object:
         except Exception: pass
     return None
 
+def _ws_accept(args: list[object]) -> object:
+    fd = args[0]
+    key = args[1]
+    if not isinstance(key, str): raise DonkyRuntimeError("ws_accept() expects string key")
+    s = SOCKETS.get(fd)
+    if not s: raise DonkyRuntimeError("invalid client socket")
+    accept_key = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+    response = f"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept_key}\r\n\r\n"
+    try:
+        s.sendall(response.encode())
+        return None
+    except Exception as e:
+        raise DonkyRuntimeError(f"ws_accept failed: {e}")
+
+def _ws_read(args: list[object]) -> object:
+    fd = args[0]
+    s = SOCKETS.get(fd)
+    if not s: raise DonkyRuntimeError("invalid client socket")
+    try:
+        header = s.recv(2)
+        if len(header) < 2: return None
+        opcode = header[0] & 0x0F
+        masked = (header[1] & 0x80) != 0
+        length = header[1] & 0x7F
+        
+        if length == 126: length = int.from_bytes(s.recv(2), 'big')
+        elif length == 127: length = int.from_bytes(s.recv(8), 'big')
+            
+        mask = s.recv(4) if masked else b''
+        payload = s.recv(length)
+        
+        if masked:
+            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+            
+        if opcode == 8: return "" # Close frame
+        return payload.decode('utf-8', errors='replace')
+    except Exception:
+        return ""
+
+def _ws_write(args: list[object]) -> object:
+    fd = args[0]
+    msg = args[1]
+    if not isinstance(msg, str): raise DonkyRuntimeError("ws_write() expects string")
+    s = SOCKETS.get(fd)
+    if not s: raise DonkyRuntimeError("invalid client socket")
+    try:
+        payload = msg.encode('utf-8')
+        length = len(payload)
+        if length < 126: header = bytes([0x81, length])
+        elif length < 65536: header = bytes([0x81, 126]) + length.to_bytes(2, 'big')
+        else: header = bytes([0x81, 127]) + length.to_bytes(8, 'big')
+        s.sendall(header + payload)
+        return None
+    except Exception as e:
+        raise DonkyRuntimeError(f"ws_write failed: {e}")
+
 def _http_get(args: list[object]) -> object:
     url = args[0]
     if not isinstance(url, str):
@@ -288,6 +346,9 @@ BUILTINS = [
     ("mime_type",  1, _mime_type,    1),
     ("spawn",      1, _spawn,        1),
     ("http_get",   1, _http_get,     1),
+    ("ws_accept", 2, _ws_accept, 2),
+    ("ws_read",   1, _ws_read,   1),
+    ("ws_write",  2, _ws_write,  2),
 ]
 
 def install_builtins(env: Environment, args: list[str] | None = None) -> None:

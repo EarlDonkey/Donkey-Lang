@@ -54,7 +54,7 @@ class Parser:
 
     def _is_struct_init(self) -> bool:
         """Look ahead from 'IDENT {' to see if it's 'IDENT { IDENT :'."""
-        i = self.pos + 2
+        i = self.pos + 1
         if i + 1 >= len(self.tokens):
             return False
         return (self.tokens[i].type == TokenType.IDENT and 

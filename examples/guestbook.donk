@@ -27,30 +27,59 @@ fn get_entries_html() -> str {
 
 fn handle_client(client) -> void {
     let request = tcp_read(client, 8192);
-    if len(request) == 0 {
+    if len(request) == 0 { 
+        tcp_close(client); 
+        return; 
+    }
+
+    // Split headers and body (separated by \r\n\r\n)
+    let parts = split(request, "\r\n\r\n");
+    let header_text = parts[0];
+    let body = "";
+    if len(parts) > 1 {
+        body = parts[1];
+    }
+
+    let lines = split(header_text, "\r\n");
+    let req_line = split(lines[0], " ");
+    let method = req_line[0];
+    let path = req_line[1];
+
+    // --- WebSocket Upgrade Logic ---
+    if path == "/ws" {
+        let key = "";
+        for line in lines {
+            let kv = split(line, ":");
+            if len(kv) == 2 && lower(trim(kv[0])) == "sec-websocket-key" {
+                key = trim(kv[1]);
+            }
+        }
+        if len(key) > 0 {
+            ws_accept(client, key);
+            while true {
+                let msg = ws_read(client);
+                if len(msg) == 0 { break; }
+                ws_write(client, "Echo: " + msg);
+            }
+        }
         tcp_close(client);
         return;
     }
 
-    let parts = split(request, "\r\n\r\n");
-    let headers = split(parts[0], "\r\n");
-    let req_line = split(headers[0], " ");
-    let method = req_line[0];
-    let path = req_line[1];
-
+    // --- Standard HTTP Logic ---
     if method == "GET" {
         let filepath = "examples/public" + path;
         if path == "/" { filepath = "examples/public/index.html"; }
         
         if file_exists(filepath) {
-            let body = read_file(filepath);
+            let file_body = read_file(filepath);
             let mime = mime_type(filepath);
             
             if mime == "text/html" {
-                body = replace(body, "{{ENTRIES}}", get_entries_html());
+                file_body = replace(file_body, "{{ENTRIES}}", get_entries_html());
             }
             
-            let resp = "HTTP/1.1 200 OK\r\nContent-Type: " + mime + "\r\nConnection: close\r\n\r\n" + body;
+            let resp = "HTTP/1.1 200 OK\r\nContent-Type: " + mime + "\r\nConnection: close\r\n\r\n" + file_body;
             tcp_write(client, resp);
         } else {
             let msg = "<h1>404 Not Found</h1><p>The page you requested doesn't exist.</p>";
@@ -59,12 +88,6 @@ fn handle_client(client) -> void {
         }
     } else if method == "POST" {
         if path == "/sign" {
-            let body = "";
-            if len(parts) > 1 {
-                body = parts[1];
-            }
-            
-            // Parse the form data (name=Alice&message=Hello)
             let fields = split(body, "&");
             let name = "Anonymous";
             let msg = "";
@@ -80,7 +103,6 @@ fn handle_client(client) -> void {
                 }
             }
             
-            // Save to file
             let entry = name + "|" + msg + "\n";
             let existing = "";
             if file_exists(db_path) {
@@ -88,7 +110,6 @@ fn handle_client(client) -> void {
             }
             write_file(db_path, existing + entry);
             
-            // Redirect back to home
             let resp = "HTTP/1.1 302 Found\r\nLocation: /\r\nConnection: close\r\n\r\n";
             tcp_write(client, resp);
         }
@@ -99,6 +120,5 @@ fn handle_client(client) -> void {
 
 while true {
     let client = tcp_accept(server);
-    // Spawn a thread to handle this client so the server doesn't block!
     spawn(fn() -> void { handle_client(client); });
 }

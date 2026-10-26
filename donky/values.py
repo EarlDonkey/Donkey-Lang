@@ -75,6 +75,7 @@ def is_int(v: object) -> bool:
 
 
 def type_name(v: object) -> str:
+    if v is None: return "null"
     if isinstance(v, bool):
         return "bool"
     if isinstance(v, (int, float)):

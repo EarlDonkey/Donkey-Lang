@@ -44,6 +44,9 @@ BUILTIN_RETURNS = {
     "mime_type":   TYPE_STRING,
     "spawn":       TYPE_ANY,
     "http_get":    TYPE_STRING,
+    "ws_accept": TYPE_ANY,
+    "ws_read":   TYPE_STRING,
+    "ws_write":  TYPE_ANY,
 }
 
 
