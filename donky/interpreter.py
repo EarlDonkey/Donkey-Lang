@@ -37,6 +37,8 @@ class Interpreter:
 
     def exec_stmt(self, stmt: ast.Stmt) -> None:
         match stmt:
+            case ast.StructDefStmt():
+                pass # Type-only, does nothing at runtime
             case ast.LetStmt(name, value, line, col):
                 self.env.define(name, self.eval_expr(value))
             case ast.PrintStmt(value, line, col):
@@ -119,6 +121,12 @@ class Interpreter:
                 else:
                     self._check_index(container, index, stmt)
                     container[index] = value
+            case ast.FieldSet(obj_expr, field, value_expr, line, col):
+                obj = self.eval_expr(obj_expr)
+                if not isinstance(obj, dict):
+                    raise self._err(stmt, f"cannot set field on {type_name(obj)}")
+                val = self.eval_expr(value_expr)
+                obj[field] = val
             case _:
                 raise DonkyRuntimeError(f"cannot execute {type(stmt).__name__}")
 
@@ -165,6 +173,18 @@ class Interpreter:
                     else:
                         result.append(format_value(self.eval_expr(p)))
                 return "".join(result)
+            case ast.StructInit(name, fields, line, col):
+                result = {}
+                for f_name, f_expr in fields:
+                    result[f_name] = self.eval_expr(f_expr)
+                return result
+            case ast.FieldAccess(obj_expr, field, line, col):
+                obj = self.eval_expr(obj_expr)
+                if not isinstance(obj, dict):
+                    raise self._err(expr, f"cannot access field '{field}' on {type_name(obj)}")
+                if field not in obj:
+                    raise self._err(expr, f"field '{field}' not found")
+                return obj[field]
             case ast.Unary(op, operand, line, col):
                 return self._eval_unary(op, self.eval_expr(operand), expr)
             case ast.Binary(l, "&&", r, line, col):

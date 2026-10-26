@@ -1,0 +1,58 @@
+// A tiny, single-threaded HTTP server written in Donky.
+// Run: python -m donky.run examples/http_server.donk
+// Open: http://localhost:8080
+
+let port = 8080;
+if len(args) > 0 {
+    port = num(args[0]);
+}
+
+let server = tcp_listen(port);
+print("Server running at http://localhost:${port}");
+print("Press Ctrl+C to stop.");
+
+while true {
+    // Wait for a browser to connect
+    let client = tcp_accept(server);
+    
+    // Read the HTTP request (e.g., "GET /index.html HTTP/1.1")
+    let request = tcp_read(client, 4096);
+    
+    if len(request) > 0 {
+        let lines = split(request, "\r\n");
+        let parts = split(lines[0], " ");
+        
+        if len(parts) >= 2 {
+            let method = parts[0];
+            let path = parts[1];
+            
+            if method == "GET" {
+                let filepath = "examples/public" + path;
+                if path == "/" {
+                    filepath = "examples/public/index.html";
+                }
+                
+                if file_exists(filepath) {
+                    let body = read_file(filepath);
+                    let response = "HTTP/1.1 200 OK\r\n" +
+                                   "Content-Type: text/html\r\n" +
+                                   "Connection: close\r\n" +
+                                   "\r\n" +
+                                   body;
+                    tcp_write(client, response);
+                } else {
+                    let msg = "<h1>404 Not Found</h1>";
+                    let response = "HTTP/1.1 404 Not Found\r\n" +
+                                   "Content-Type: text/html\r\n" +
+                                   "Connection: close\r\n" +
+                                   "\r\n" +
+                                   msg;
+                    tcp_write(client, response);
+                }
+            }
+        }
+    }
+    
+    // Close the connection so the browser knows we're done
+    tcp_close(client);
+}

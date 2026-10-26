@@ -91,8 +91,29 @@ class InterpolatedString:
     line: int = 0
     col: int = 0
 
+@dataclass
+class StructInit:
+    name: str
+    fields: list[tuple[str, Expr]]
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class FieldAccess:
+    obj: Expr
+    field: str
+    line: int = 0
+    col: int = 0
+
 
 # ---------- statements ----------
+
+@dataclass
+class StructDefStmt:
+    name: str
+    fields: list[tuple[str, str]]
+    line: int = 0
+    col: int = 0
 
 @dataclass
 class LetStmt:
@@ -195,6 +216,14 @@ class IndexSet:
     line: int = 0
     col: int = 0
 
+@dataclass
+class FieldSet:
+    obj: Expr
+    field: str
+    value: Expr
+    line: int = 0
+    col: int = 0
+
 
 @dataclass
 class Program:
@@ -204,7 +233,7 @@ class Program:
 
 
 Expr = (NumberLit | StringLit | BoolLit | Ident | Binary | Unary
-        | Assign | Call | ArrayLit | MapLit | Index | FnExpr | InterpolatedString)
-Stmt = (LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | ForStmt
+        | Assign | Call | ArrayLit | MapLit | Index | FnExpr | InterpolatedString | StructInit | FieldAccess)
+Stmt = (StructDefStmt | LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | ForStmt
         | FnStmt | ReturnStmt | Block | IndexSet | BreakStmt | ContinueStmt
-        | TryStmt | ThrowStmt | ImportStmt)
+        | TryStmt | ThrowStmt | ImportStmt | FieldSet)

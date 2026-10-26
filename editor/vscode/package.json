@@ -51,6 +51,14 @@
           "description": "Python interpreter that has pygls installed. Leave empty to auto-detect .venv walking up from the workspace, then from the extension folder, then fall back to 'python'."
         }
       }
+    },
+    "configurationDefaults": {
+      "[donky]": {
+        "editor.defaultFormatter": "Earl Donkey.donky",
+        "editor.formatOnSave": true,
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+      }
     }
   },
   "license": "MIT"

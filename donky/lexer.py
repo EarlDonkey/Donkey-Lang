@@ -25,6 +25,7 @@ class TokenType(Enum):
     CATCH = auto()
     THROW = auto()
     IMPORT = auto()
+    STRUCT = auto()
     PLUS = auto()
     MINUS = auto()
     STAR = auto()
@@ -49,6 +50,7 @@ class TokenType(Enum):
     SEMI = auto()
     COMMA = auto()
     COLON = auto()
+    DOT = auto()
     EOF = auto()
 
 
@@ -91,6 +93,7 @@ KEYWORDS = {
     "catch":    TokenType.CATCH,
     "throw":    TokenType.THROW,
     "import":   TokenType.IMPORT,
+    "struct":   TokenType.STRUCT,
 }
 
 
@@ -158,7 +161,7 @@ class Lexer:
             "{": TokenType.LBRACE, "}": TokenType.RBRACE,
             "[": TokenType.LBRACKET, "]": TokenType.RBRACKET,
             ";": TokenType.SEMI,   ",": TokenType.COMMA,
-            ":": TokenType.COLON,
+            ":": TokenType.COLON,  ".": TokenType.DOT,
         }
         if ch in simple:
             return Token(simple[ch], ch, None, line, col)
@@ -209,7 +212,7 @@ class Lexer:
                 if esc == "$":
                     chars.append("\0")
                 else:
-                    mapping = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
+                    mapping = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\"}
                     if esc not in mapping:
                         raise LexError(f"unknown escape '\\{esc}'", self.line, self.col)
                     chars.append(mapping[esc])

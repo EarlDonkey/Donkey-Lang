@@ -1,8 +1,14 @@
+import socket
+import itertools
+
 from donky.errors import DonkyRuntimeError
 from donky.values import (
     Builtin, Environment, format_value, is_number, type_name,
 )
 
+# Global socket registry
+_socket_counter = itertools.count(1)
+SOCKETS: dict[int, socket.socket] = {}
 
 def _len(args: list[object]) -> object:
     v = args[0]
@@ -16,10 +22,8 @@ def _len(args: list[object]) -> object:
         f"len() expects string, array, or map, got {type_name(v)}"
     )
 
-
 def _str(args: list[object]) -> object:
     return format_value(args[0])
-
 
 def _num(args: list[object]) -> object:
     v = args[0]
@@ -40,10 +44,8 @@ def _num(args: list[object]) -> object:
     except ValueError:
         raise DonkyRuntimeError(f"num() cannot parse {v!r}")
 
-
 def _type(args: list[object]) -> object:
     return type_name(args[0])
-
 
 def _push(args: list[object]) -> object:
     arr, val = args
@@ -54,7 +56,6 @@ def _push(args: list[object]) -> object:
     arr.append(val)
     return None
 
-
 def _pop(args: list[object]) -> object:
     arr = args[0]
     if not isinstance(arr, list):
@@ -64,7 +65,6 @@ def _pop(args: list[object]) -> object:
     if not arr:
         raise DonkyRuntimeError("pop() from empty array")
     return arr.pop()
-
 
 def _read_file(args: list[object]) -> object:
     path = args[0]
@@ -79,7 +79,6 @@ def _read_file(args: list[object]) -> object:
         raise DonkyRuntimeError(
             f"read_file: cannot open {path!r}: {e.strerror or e}"
         )
-
 
 def _write_file(args: list[object]) -> object:
     path, content = args
@@ -100,7 +99,6 @@ def _write_file(args: list[object]) -> object:
         )
     return None
 
-
 def _file_exists(args: list[object]) -> object:
     import os
     path = args[0]
@@ -109,7 +107,6 @@ def _file_exists(args: list[object]) -> object:
             f"file_exists() expects string, got {type_name(path)}"
         )
     return os.path.exists(path)
-
 
 def _split(args: list[object]) -> object:
     s, sep = args
@@ -124,7 +121,6 @@ def _split(args: list[object]) -> object:
     if sep == "":
         raise DonkyRuntimeError("split() separator cannot be empty")
     return s.split(sep)
-
 
 def _join(args: list[object]) -> object:
     arr, sep = args
@@ -145,7 +141,6 @@ def _join(args: list[object]) -> object:
         parts.append(e)
     return sep.join(parts)
 
-
 def _contains(args: list[object]) -> object:
     container, item = args
     if isinstance(container, str):
@@ -162,13 +157,11 @@ def _contains(args: list[object]) -> object:
         f"contains() expects string, array, or map, got {type_name(container)}"
     )
 
-
 def _keys(args: list[object]) -> object:
     m = args[0]
     if not isinstance(m, dict):
         raise DonkyRuntimeError(f"keys() expects map, got {type_name(m)}")
     return list(m.keys())
-
 
 def _upper(args: list[object]) -> object:
     s = args[0]
@@ -178,7 +171,6 @@ def _upper(args: list[object]) -> object:
         )
     return s.upper()
 
-
 def _lower(args: list[object]) -> object:
     s = args[0]
     if not isinstance(s, str):
@@ -187,7 +179,6 @@ def _lower(args: list[object]) -> object:
         )
     return s.lower()
 
-
 def _trim(args: list[object]) -> object:
     s = args[0]
     if not isinstance(s, str):
@@ -195,7 +186,6 @@ def _trim(args: list[object]) -> object:
             f"trim() expects string, got {type_name(s)}"
         )
     return s.strip()
-
 
 def _replace(args: list[object]) -> object:
     s, old, new = args
@@ -215,7 +205,6 @@ def _replace(args: list[object]) -> object:
         raise DonkyRuntimeError("replace() old cannot be empty")
     return s.replace(old, new)
 
-
 def _input(args: list[object]) -> object:
     if len(args) == 0:
         prompt = ""
@@ -229,7 +218,6 @@ def _input(args: list[object]) -> object:
         return input(prompt)
     except EOFError:
         raise DonkyRuntimeError("input(): end of input")
-
 
 def _sort(args: list[object]) -> object:
     arr = args[0]
@@ -260,6 +248,79 @@ def _sort(args: list[object]) -> object:
         raise DonkyRuntimeError(f"sort() failed: {e}")
     return None
 
+# ---------- Networking ----------
+
+def _tcp_listen(args: list[object]) -> object:
+    port = args[0]
+    if not isinstance(port, int) or isinstance(port, bool):
+        raise DonkyRuntimeError("tcp_listen() expects integer port")
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", port))
+        s.listen(5)
+        fd = next(_socket_counter)
+        SOCKETS[fd] = s
+        return fd
+    except Exception as e:
+        raise DonkyRuntimeError(f"tcp_listen failed: {e}")
+
+def _tcp_accept(args: list[object]) -> object:
+    fd = args[0]
+    if not isinstance(fd, int) or isinstance(fd, bool):
+        raise DonkyRuntimeError("tcp_accept() expects integer socket ID")
+    s = SOCKETS.get(fd)
+    if not s:
+        raise DonkyRuntimeError("invalid server socket")
+    try:
+        client, addr = s.accept()
+        cfd = next(_socket_counter)
+        SOCKETS[cfd] = client
+        return cfd
+    except Exception as e:
+        raise DonkyRuntimeError(f"tcp_accept failed: {e}")
+
+def _tcp_read(args: list[object]) -> object:
+    fd = args[0]
+    if not isinstance(fd, int) or isinstance(fd, bool):
+        raise DonkyRuntimeError("tcp_read() expects integer socket ID")
+    max_bytes = args[1] if len(args) > 1 else 4096
+    s = SOCKETS.get(fd)
+    if not s:
+        raise DonkyRuntimeError("invalid client socket")
+    try:
+        data = s.recv(max_bytes)
+        return data.decode("utf-8", errors="replace")
+    except Exception as e:
+        raise DonkyRuntimeError(f"tcp_read failed: {e}")
+
+def _tcp_write(args: list[object]) -> object:
+    fd = args[0]
+    data = args[1]
+    if not isinstance(fd, int) or isinstance(fd, bool):
+        raise DonkyRuntimeError("tcp_write() expects integer socket ID")
+    if not isinstance(data, str):
+        raise DonkyRuntimeError("tcp_write() expects string")
+    s = SOCKETS.get(fd)
+    if not s:
+        raise DonkyRuntimeError("invalid client socket")
+    try:
+        s.sendall(data.encode("utf-8"))
+        return None
+    except Exception as e:
+        raise DonkyRuntimeError(f"tcp_write failed: {e}")
+
+def _tcp_close(args: list[object]) -> object:
+    fd = args[0]
+    if not isinstance(fd, int) or isinstance(fd, bool):
+        raise DonkyRuntimeError("tcp_close() expects integer socket ID")
+    s = SOCKETS.pop(fd, None)
+    if s:
+        try:
+            s.close()
+        except Exception:
+            pass
+    return None
 
 BUILTINS = [
     ("len",        1, _len,          1),
@@ -281,8 +342,12 @@ BUILTINS = [
     ("replace",    3, _replace,      3),
     ("input",      0, _input,        1),
     ("sort",       1, _sort,         1),
+    ("tcp_listen", 1, _tcp_listen,   1),
+    ("tcp_accept", 1, _tcp_accept,   1),
+    ("tcp_read",   1, _tcp_read,     2),
+    ("tcp_write",  2, _tcp_write,    2),
+    ("tcp_close",  1, _tcp_close,    1),
 ]
-
 
 def install_builtins(env: Environment, args: list[str] | None = None) -> None:
     for name, arity, impl, max_arity in BUILTINS:

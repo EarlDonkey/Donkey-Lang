@@ -1,0 +1,27 @@
+struct User {
+    name: str,
+    age: num
+}
+
+struct Server {
+    host: str,
+    port: num,
+    admin: User
+}
+
+let alice = User { name: "Alice", age: 30 };
+let bob = User { name: "Bob", age: 25 };
+
+// We can mutate structs
+alice.age = 31;
+
+// We can nest them
+let web = Server {
+    host: "localhost",
+    port: 8080,
+    admin: alice
+};
+
+// We can interpolate them
+print("Admin is ${web.admin.name}, age ${web.admin.age}");
+print("Server is at ${web.host}:${web.port}");

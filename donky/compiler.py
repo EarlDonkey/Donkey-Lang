@@ -177,6 +177,8 @@ class Compiler:
             self.position = (line, col)
 
         match stmt:
+            case ast.StructDefStmt():
+                pass # Type-only
             case ast.LetStmt(name, value, line, col):
                 self.compile_expr(value)
                 self._declare_name(name)
@@ -231,6 +233,11 @@ class Compiler:
             case ast.IndexSet(name, index, value, line, col):
                 self._load_name(name)
                 self.compile_expr(index)
+                self.compile_expr(value)
+                self._emit(Op.INDEX_SET)
+            case ast.FieldSet(obj, field, value, line, col):
+                self.compile_expr(obj)
+                self._emit(Op.CONST, self.code.constant_index(field))
                 self.compile_expr(value)
                 self._emit(Op.INDEX_SET)
             case _:
@@ -400,6 +407,15 @@ class Compiler:
                     for p in parts[1:]:
                         self._compile_interp_part(p)
                         self._emit(Op.ADD)
+            case ast.StructInit(name, fields, line, col):
+                for f_name, f_expr in fields:
+                    self._emit(Op.CONST, self.code.constant_index(f_name))
+                    self.compile_expr(f_expr)
+                self._emit(Op.NEW_MAP, len(fields))
+            case ast.FieldAccess(obj, field, line, col):
+                self.compile_expr(obj)
+                self._emit(Op.CONST, self.code.constant_index(field))
+                self._emit(Op.INDEX_GET)
             case ast.Unary("-", operand, line, col):
                 self.compile_expr(operand)
                 self._emit(Op.NEG)

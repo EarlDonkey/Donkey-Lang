@@ -30,6 +30,11 @@ BUILTIN_RETURNS = {
     "replace":     TYPE_STRING,
     "input":       TYPE_STRING,
     "sort":        TYPE_ANY,
+    "tcp_listen":  TYPE_NUMBER,
+    "tcp_accept":  TYPE_NUMBER,
+    "tcp_read":    TYPE_STRING,
+    "tcp_write":   TYPE_ANY,
+    "tcp_close":   TYPE_ANY,
 }
 
 
@@ -56,6 +61,7 @@ class TypeChecker:
         self.scopes: list[dict[str, str]] = [{}]
         self.fn_returns: list[str | None] = [None]
         self.fn_arities: dict[str, int] = {}
+        self.structs: dict[str, dict[str, str]] = {}
         self.loop_depth = 0
 
     def check(self, program: ast.Program) -> None:
@@ -80,8 +86,23 @@ class TypeChecker:
     def _define(self, name: str, t: str) -> None:
         self.scopes[-1][name] = t
 
+    def _resolve_type(self, typ: str) -> str:
+        if typ in ANNOTATION_TO_TYPE:
+            return ANNOTATION_TO_TYPE[typ]
+        if typ in self.structs:
+            return typ
+        return TYPE_ANY
+
     def check_stmt(self, stmt: ast.Stmt) -> None:
         match stmt:
+            case ast.StructDefStmt(name, fields, line, col):
+                if name in self.structs:
+                    raise TypeCheckError(f"struct '{name}' already defined", line, col)
+                field_dict = {}
+                for f_name, f_type in fields:
+                    field_dict[f_name] = self._resolve_type(f_type)
+                self.structs[name] = field_dict
+
             case ast.LetStmt(name, value, line, col):
                 t = self.infer(value)
                 self._define(name, t)
@@ -97,6 +118,17 @@ class TypeChecker:
 
             case ast.Assign(name, value, line, col):
                 self._check_assign(stmt)
+
+            case ast.FieldSet(obj, field, value, line, col):
+                ot = self.infer(obj)
+                if ot not in self.structs:
+                    raise TypeCheckError(f"cannot set field on {ot}", line, col)
+                if field not in self.structs[ot]:
+                    raise TypeCheckError(f"struct '{ot}' has no field '{field}'", line, col)
+                vt = self.infer(value)
+                expected = self.structs[ot][field]
+                if expected != TYPE_ANY and vt != TYPE_ANY and vt != expected:
+                    raise TypeCheckError(f"field '{field}' expects {expected}, got {vt}", line, col)
 
             case ast.IfStmt(cond, then, else_, line, col):
                 ct = self.infer(cond)
@@ -135,7 +167,7 @@ class TypeChecker:
                     self.loop_depth -= 1
 
             case ast.FnStmt(name, params, ret, body, line, col):
-                ret_t = ANNOTATION_TO_TYPE.get(ret, TYPE_ANY)
+                ret_t = self._resolve_type(ret)
                 self.fn_arities[name] = len(params)
                 self._define(name, TYPE_FUNCTION)
                 self.fn_returns.append(ret_t)
@@ -257,6 +289,26 @@ class TypeChecker:
                     if not isinstance(p, str):
                         self.infer(p)
                 return TYPE_STRING
+            case ast.StructInit(name, fields, line, col):
+                if name not in self.structs:
+                    raise TypeCheckError(f"undefined struct '{name}'", line, col)
+                expected = self.structs[name]
+                if len(fields) != len(expected):
+                    raise TypeCheckError(f"expected {len(expected)} fields for '{name}', got {len(fields)}", line, col)
+                for f_name, f_expr in fields:
+                    if f_name not in expected:
+                        raise TypeCheckError(f"struct '{name}' has no field '{f_name}'", line, col)
+                    vt = self.infer(f_expr)
+                    if expected[f_name] != TYPE_ANY and vt != TYPE_ANY and vt != expected[f_name]:
+                        raise TypeCheckError(f"field '{f_name}' expects {expected[f_name]}, got {vt}", line, col)
+                return name
+            case ast.FieldAccess(obj, field, line, col):
+                ot = self.infer(obj)
+                if ot in self.structs:
+                    if field not in self.structs[ot]:
+                        raise TypeCheckError(f"struct '{ot}' has no field '{field}'", line, col)
+                    return self.structs[ot][field]
+                return TYPE_ANY
             case ast.ArrayLit():
                 for e in expr.elems:
                     self.infer(e)
@@ -317,7 +369,7 @@ class TypeChecker:
                 return TYPE_ANY
 
     def _check_index(self, ct: str, index: ast.Expr) -> None:
-        if ct not in (TYPE_ARRAY, TYPE_STRING, TYPE_MAP, TYPE_ANY):
+        if ct not in (TYPE_ARRAY, TYPE_STRING, TYPE_MAP, TYPE_ANY) and ct not in self.structs:
             raise TypeCheckError(
                 f"cannot index {ct}", index.line, index.col
             )

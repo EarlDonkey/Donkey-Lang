@@ -46,12 +46,21 @@ def show(node, indent: int = 0) -> str:
                     + show(body, indent + 1))
         case ast.InterpolatedString(parts):
             return f"{pad}InterpolatedString({parts})"
+        case ast.StructInit(name, fields):
+            out = f"{pad}StructInit({name})"
+            for f_name, f_expr in fields:
+                out += f"\n{pad}  {f_name}: " + show(f_expr, indent + 1)
+            return out
+        case ast.FieldAccess(obj, field):
+            return f"{pad}FieldAccess({field})\n" + show(obj, indent + 1)
         case ast.Program(stmts):
             return "\n".join(show(s, indent) for s in stmts)
         case ast.Block(stmts):
             if not stmts:
                 return f"{pad}Block()"
             return f"{pad}Block\n" + "\n".join(show(s, indent + 1) for s in stmts)
+        case ast.StructDefStmt(name, fields):
+            return f"{pad}StructDef({name})"
         case ast.LetStmt(n, v):
             return f"{pad}Let({n})\n" + show(v, indent + 1)
         case ast.PrintStmt(v):
@@ -83,6 +92,10 @@ def show(node, indent: int = 0) -> str:
         case ast.IndexSet(name, idx, val):
             return (f"{pad}IndexSet({name})\n"
                     + show(idx, indent + 1) + "\n"
+                    + show(val, indent + 1))
+        case ast.FieldSet(obj, field, val):
+            return (f"{pad}FieldSet({field})\n"
+                    + show(obj, indent + 1) + "\n"
                     + show(val, indent + 1))
         case ast.TryStmt(body, err_name, handler):
             return (f"{pad}Try(catch {err_name})\n"

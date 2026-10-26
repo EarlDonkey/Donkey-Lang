@@ -2,7 +2,6 @@
 
 import logging
 import os
-import re
 import sys
 from urllib.parse import unquote, urlparse
 
@@ -28,7 +27,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("donky-lsp")
 
-server = LanguageServer("donky-lsp", "0.3.0")
+server = LanguageServer("donky-lsp", "0.4.0")
 
 _ERROR_PREFIXES = (
     "lex error:", "parse error:", "runtime error:",
@@ -38,7 +37,7 @@ _ERROR_PREFIXES = (
 KEYWORDS = [
     "let", "fn", "if", "else", "while", "for", "in", "return",
     "break", "continue", "try", "catch", "throw", "import",
-    "print", "div", "true", "false",
+    "print", "div", "true", "false", "struct",
 ]
 
 BUILTINS = {
@@ -61,6 +60,11 @@ BUILTINS = {
     "replace": "fn replace(s: string, old: string, new: string) -> string",
     "input": "fn input(prompt: string) -> string",
     "sort": "fn sort(arr: array) -> void",
+    "tcp_listen": "fn tcp_listen(port: number) -> number",
+    "tcp_accept": "fn tcp_accept(server_id: number) -> number",
+    "tcp_read":   "fn tcp_read(client_id: number, max_bytes?: number) -> string",
+    "tcp_write":  "fn tcp_write(client_id: number, data: string) -> void",
+    "tcp_close":  "fn tcp_close(socket_id: number) -> void",
 }
 
 # ---------------------------------------------------------------- helpers
@@ -97,7 +101,6 @@ def _diag(message: str, line: int, col: int, length: int = 1) -> types.Diagnosti
 
 
 def _parse(uri: str, text: str):
-    """Helper to get the expanded AST. Returns None if parsing fails."""
     try:
         tokens = Lexer(text).tokenize()
         program = Parser(tokens).parse()
@@ -149,10 +152,8 @@ def _validate_inner(uri: str, text: str) -> list[types.Diagnostic]:
 # ---------------------------------------------------------- AST Traversal
 
 def _find_scope_symbols(program: ast.Program, target_line: int, target_col: int) -> dict[str, str]:
-    """Walk the AST up to the target position and collect all visible variables."""
     symbols = {}
     
-    # Add builtins and keywords as functions/objects
     for name, sig in BUILTINS.items():
         symbols[name] = sig
     symbols["args"] = "array"
@@ -166,8 +167,9 @@ def _find_scope_symbols(program: ast.Program, target_line: int, target_col: int)
         elif isinstance(node, ast.FnStmt):
             params = ", ".join(node.params)
             scope[node.name] = f"fn {node.name}({params}) -> {node.return_type}"
+        elif isinstance(node, ast.StructDefStmt):
+            scope[node.name] = f"struct {node.name}"
         
-        # Recurse into blocks
         if isinstance(node, (ast.IfStmt, ast.WhileStmt)):
             walk_block(node.then, scope, target_line, target_col)
             if getattr(node, "else_", None):
@@ -188,7 +190,6 @@ def _find_scope_symbols(program: ast.Program, target_line: int, target_col: int)
             walk_block(node.body, inner_scope, target_line, target_col)
 
     def walk_block(block, scope, t_line, t_col):
-        # Shallow copy to preserve parent scope, but allow local shadowing
         local_scope = dict(scope)
         for s in block.stmts:
             walk_stmt(s, local_scope)
@@ -201,7 +202,6 @@ def _find_scope_symbols(program: ast.Program, target_line: int, target_col: int)
 
 
 def _find_node_at(program: ast.Program, line: int, col: int):
-    """Find the AST node at the exact line/col."""
     found = None
     
     def walk(node):
@@ -210,11 +210,9 @@ def _find_node_at(program: ast.Program, line: int, col: int):
         if not hasattr(node, "line"): return
         
         n_line, n_col = node.line, node.col
-        # If the node starts after our cursor, skip
         if n_line > line or (n_line == line and n_col > col):
             return
 
-        # Check if the cursor is on an Ident or Call
         if isinstance(node, ast.Ident):
             if n_line == line and n_col <= col <= n_col + len(node.name):
                 found = node
@@ -223,8 +221,12 @@ def _find_node_at(program: ast.Program, line: int, col: int):
             if n_line == line and n_col <= col <= n_col + len(node.callee):
                 found = node
                 return
+        elif isinstance(node, ast.FieldAccess):
+            if n_line == line and n_col <= col <= n_col + len(node.field):
+                # Create a fake Ident for hover purposes
+                found = ast.Ident(node.field, node.line, node.col)
+                return
         
-        # Recursively visit children
         if isinstance(node, ast.Program):
             for s in node.stmts: walk(s)
         elif isinstance(node, ast.Block):
@@ -265,6 +267,14 @@ def _find_node_at(program: ast.Program, line: int, col: int):
             for p in node.parts:
                 if not isinstance(p, str):
                     walk(p)
+        elif isinstance(node, ast.StructInit):
+            for f_name, f_expr in node.fields:
+                walk(f_expr)
+        elif isinstance(node, ast.FieldAccess):
+            walk(node.obj)
+        elif isinstance(node, ast.FieldSet):
+            walk(node.obj)
+            walk(node.value)
 
     walk(program)
     return found
@@ -289,14 +299,12 @@ def hover(ls: LanguageServer, params: types.HoverParams) -> types.Hover | None:
 
     name = node.name if isinstance(node, ast.Ident) else node.callee
     
-    # 1. Check builtins first
     if name in BUILTINS:
         return types.Hover(contents=types.MarkupContent(
             kind=types.MarkupKind.Markdown,
             value=f"```donky\n{BUILTINS[name]}\n```"
         ))
 
-    # 2. Look up in scope
     symbols = _find_scope_symbols(program, line, col)
     if name in symbols:
         return types.Hover(contents=types.MarkupContent(
@@ -311,19 +319,14 @@ def hover(ls: LanguageServer, params: types.HoverParams) -> types.Hover | None:
 def completion(ls: LanguageServer, params: types.CompletionParams) -> types.CompletionList:
     uri = params.text_document.uri
     doc = ls.workspace.get_text_document(uri)
-    
-    # If the file doesn't parse yet, we still want to offer keywords!
     program = _parse(uri, doc.source)
     
     items = []
-    
-    # 1. Keywords
     for kw in KEYWORDS:
         items.append(types.CompletionItem(
             label=kw, kind=types.CompletionItemKind.Keyword
         ))
         
-    # 2. Scope symbols (if it parses)
     if program:
         line = params.position.line + 1
         col = params.position.character + 1
@@ -336,14 +339,12 @@ def completion(ls: LanguageServer, params: types.CompletionParams) -> types.Comp
                 detail=sig
             ))
 
-    # VS Code automatically filters items based on what the user typed,
-    # so we can just return the whole list.
     return types.CompletionList(is_incomplete=False, items=items)
+
 
 # ---------------------------------------------------------- Navigation
 
-def _find_definition(program: ast.Program, name: str, current_uri: str, base_dir: str):
-    """Walk the AST looking for the definition. Returns (uri, node)."""
+def _find_definition(program: ast.Program, name: str):
     found = None
     
     def walk(node):
@@ -354,8 +355,9 @@ def _find_definition(program: ast.Program, name: str, current_uri: str, base_dir
             found = node
         elif isinstance(node, ast.FnStmt) and node.name == name:
             found = node
+        elif isinstance(node, ast.StructDefStmt) and node.name == name:
+            found = node
         
-        # Recurse into blocks
         if isinstance(node, ast.Program):
             for s in node.stmts: walk(s)
         elif isinstance(node, ast.Block):
@@ -382,7 +384,6 @@ def definition(ls: LanguageServer, params: types.DefinitionParams) -> types.Loca
     uri = params.text_document.uri
     doc = ls.workspace.get_text_document(uri)
     
-    # We need the unexpanded program to find which module it came from
     try:
         tokens = Lexer(doc.source).tokenize()
         raw_program = Parser(tokens).parse()
@@ -392,7 +393,6 @@ def definition(ls: LanguageServer, params: types.DefinitionParams) -> types.Loca
     path = unquote(urlparse(uri).path)
     base_dir = os.path.dirname(path) if path else os.getcwd()
     
-    # Check local scope first
     line = params.position.line + 1
     col = params.position.character + 1
     
@@ -402,12 +402,10 @@ def definition(ls: LanguageServer, params: types.DefinitionParams) -> types.Loca
 
     name = local_node.name if isinstance(local_node, ast.Ident) else local_node.callee
     
-    # Look in the current file
-    defn = _find_definition(raw_program, name, uri, base_dir)
+    defn = _find_definition(raw_program, name)
     target_uri = uri
     
     if not defn:
-        # Not in current file. Check imports.
         for stmt in raw_program.stmts:
             if isinstance(stmt, ast.ImportStmt):
                 import_path = os.path.abspath(os.path.join(base_dir, stmt.path))
@@ -421,7 +419,7 @@ def definition(ls: LanguageServer, params: types.DefinitionParams) -> types.Loca
                         try:
                             imp_toks = Lexer(import_doc.source).tokenize()
                             imp_prog = Parser(imp_toks).parse()
-                            defn = _find_definition(imp_prog, name, import_uri, base_dir)
+                            defn = _find_definition(imp_prog, name)
                             if defn:
                                 target_uri = import_uri
                                 break
@@ -434,6 +432,147 @@ def definition(ls: LanguageServer, params: types.DefinitionParams) -> types.Loca
             range=_range(defn.line, defn.col, len(name))
         )
     return None
+
+
+@server.feature(types.TEXT_DOCUMENT_DOCUMENT_SYMBOL)
+def document_symbol(ls: LanguageServer, params: types.DocumentSymbolParams) -> list[types.DocumentSymbol]:
+    uri = params.text_document.uri
+    doc = ls.workspace.get_text_document(uri)
+    program = _parse(uri, doc.source)
+    if not program:
+        return []
+
+    symbols = []
+    for stmt in program.stmts:
+        if isinstance(stmt, ast.FnStmt):
+            params = ", ".join(stmt.params)
+            sig = f"fn {stmt.name}({params}) -> {stmt.return_type}"
+            symbols.append(types.DocumentSymbol(
+                name=stmt.name,
+                detail=sig,
+                kind=types.SymbolKind.Function,
+                range=_range(stmt.line, stmt.col),
+                selection_range=_range(stmt.line, stmt.col, len(stmt.name))
+            ))
+        elif isinstance(stmt, ast.LetStmt):
+            symbols.append(types.DocumentSymbol(
+                name=stmt.name,
+                detail="let",
+                kind=types.SymbolKind.Variable,
+                range=_range(stmt.line, stmt.col),
+                selection_range=_range(stmt.line, stmt.col, len(stmt.name))
+            ))
+        elif isinstance(stmt, ast.StructDefStmt):
+            symbols.append(types.DocumentSymbol(
+                name=stmt.name,
+                detail="struct",
+                kind=types.SymbolKind.Struct,
+                range=_range(stmt.line, stmt.col),
+                selection_range=_range(stmt.line, stmt.col, len(stmt.name))
+            ))
+            
+    return symbols
+
+# ------------------------------------------------------ IDE Polish
+
+def _brace_delta(line: str) -> int:
+    delta = 0
+    in_string = False
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if in_string:
+            if c == "\\":
+                i += 2
+                continue
+            if c == '"':
+                in_string = False
+            i += 1
+            continue
+        if c == '"':
+            in_string = True
+        elif c == "/" and i + 1 < len(line) and line[i + 1] == "/":
+            break
+        elif c == "{":
+            delta += 1
+        elif c == "}":
+            delta -= 1
+        i += 1
+    return delta
+
+
+@server.feature(types.TEXT_DOCUMENT_FOLDING_RANGE)
+def folding_range(ls: LanguageServer, params: types.FoldingRangeParams) -> list[types.FoldingRange]:
+    uri = params.text_document.uri
+    doc = ls.workspace.get_text_document(uri)
+    try:
+        tokens = Lexer(doc.source).tokenize()
+    except Exception:
+        return []
+
+    ranges = []
+    stack = []
+    for tok in tokens:
+        if tok.type == TokenType.LBRACE:
+            stack.append(tok.line - 1)
+        elif tok.type == TokenType.RBRACE and stack:
+            start_line = stack.pop()
+            end_line = tok.line - 1
+            if end_line > start_line:
+                ranges.append(types.FoldingRange(
+                    start_line=start_line,
+                    end_line=end_line,
+                    kind=types.FoldingRangeKind.Region
+                ))
+    return ranges
+
+
+@server.feature(types.TEXT_DOCUMENT_FORMATTING)
+def formatting(ls: LanguageServer, params: types.DocumentFormattingParams) -> list[types.TextEdit]:
+    uri = params.text_document.uri
+    doc = ls.workspace.get_text_document(uri)
+    
+    tab_size = params.options.tab_size or 4
+    insert_spaces = getattr(params.options, "insert_spaces", True)
+    indent_str = (" " * tab_size) if insert_spaces else "\t"
+    
+    lines = doc.source.splitlines()
+    new_lines = []
+    indent_level = 0
+    
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            new_lines.append("")
+            continue
+            
+        leading_braces = 0
+        i = 0
+        while i < len(stripped):
+            if stripped[i] == "}":
+                leading_braces += 1
+                i += 1
+                while i < len(stripped) and stripped[i] in " \t":
+                    i += 1
+            else:
+                break
+                
+        line_indent = max(0, indent_level - leading_braces)
+        new_lines.append((indent_str * line_indent) + stripped)
+        
+        total_delta = _brace_delta(stripped)
+        indent_level = max(0, indent_level + total_delta)
+        
+    new_text = "\n".join(new_lines)
+    if doc.source.endswith("\n"):
+        new_text += "\n"
+        
+    full_range = types.Range(
+        start=types.Position(line=0, character=0),
+        end=types.Position(line=len(lines), character=0)
+    )
+    
+    return [types.TextEdit(range=full_range, new_text=new_text)]
 
 
 # ------------------------------------------------------------- lifecycle

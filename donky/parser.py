@@ -52,6 +52,14 @@ class Parser:
         tok = self._peek()
         raise ParseError(f"expected {what}, got {tok.type.name} ({tok.lexeme!r})", tok)
 
+    def _is_struct_init(self) -> bool:
+        """Look ahead from 'IDENT {' to see if it's 'IDENT { IDENT :'."""
+        i = self.pos + 2
+        if i + 1 >= len(self.tokens):
+            return False
+        return (self.tokens[i].type == TokenType.IDENT and 
+                self.tokens[i+1].type == TokenType.COLON)
+
     def parse_expr(self, min_bp: int = 0) -> ast.Expr:
         left = self.parse_prefix()
         while True:
@@ -164,6 +172,19 @@ class Parser:
                             args.append(self.parse_expr(0))
                     self._expect(TokenType.RPAREN, "')' after call arguments")
                     expr = ast.Call(tok.lexeme, args, tok.line, tok.col)
+                elif self._check(TokenType.LBRACE) and self._is_struct_init():
+                    self._advance()
+                    fields: list[tuple[str, ast.Expr]] = []
+                    if not self._check(TokenType.RBRACE):
+                        while True:
+                            f_name = self._expect(TokenType.IDENT, "field name")
+                            self._expect(TokenType.COLON, "':' in struct init")
+                            f_val = self.parse_expr(0)
+                            fields.append((f_name.lexeme, f_val))
+                            if not self._match(TokenType.COMMA):
+                                break
+                    self._expect(TokenType.RBRACE, "'}'")
+                    expr = ast.StructInit(tok.lexeme, fields, tok.line, tok.col)
                 else:
                     expr = ast.Ident(tok.lexeme, tok.line, tok.col)
             case _:
@@ -171,11 +192,17 @@ class Parser:
                     f"expected expression, got {tok.type.name}", tok
                 )
 
-        while self._check(TokenType.LBRACKET):
-            self._advance()
-            idx = self.parse_expr(0)
-            self._expect(TokenType.RBRACKET, "']'")
-            expr = ast.Index(expr, idx, expr.line, expr.col)
+        while True:
+            if self._check(TokenType.LBRACKET):
+                self._advance()
+                idx = self.parse_expr(0)
+                self._expect(TokenType.RBRACKET, "']'")
+                expr = ast.Index(expr, idx, expr.line, expr.col)
+            elif self._match(TokenType.DOT):
+                field = self._expect(TokenType.IDENT, "field name after '.'")
+                expr = ast.FieldAccess(expr, field.lexeme, expr.line, expr.col)
+            else:
+                break
 
         return expr
 
@@ -208,6 +235,7 @@ class Parser:
         return ast.Program(stmts, line, col)
 
     def parse_statement(self) -> ast.Stmt:
+        if self._check(TokenType.STRUCT):   return self.parse_struct_def()
         if self._check(TokenType.LET):      return self.parse_let()
         if self._check(TokenType.PRINT):    return self.parse_print()
         if self._check(TokenType.IF):       return self.parse_if()
@@ -222,6 +250,21 @@ class Parser:
         if self._check(TokenType.IMPORT):   return self.parse_import()
         if self._check(TokenType.LBRACE):   return self.parse_block()
         return self.parse_expr_stmt()
+
+    def parse_struct_def(self) -> ast.StructDefStmt:
+        tok = self._advance()
+        name = self._expect(TokenType.IDENT, "struct name")
+        self._expect(TokenType.LBRACE, "'{'")
+        fields = []
+        while not self._check(TokenType.RBRACE) and not self._check(TokenType.EOF):
+            f_name = self._expect(TokenType.IDENT, "field name")
+            self._expect(TokenType.COLON, "':' after field name")
+            f_type = self._expect(TokenType.IDENT, "field type")
+            fields.append((f_name.lexeme, f_type.lexeme))
+            if not self._match(TokenType.COMMA):
+                break
+        self._expect(TokenType.RBRACE, "'}'")
+        return ast.StructDefStmt(name.lexeme, fields, tok.line, tok.col)
 
     def parse_block(self) -> ast.Block:
         tok = self._expect(TokenType.LBRACE, "'{'")
@@ -364,18 +407,19 @@ class Parser:
 
         expr = self.parse_expr()
 
-        if isinstance(expr, ast.Index) and self._check(TokenType.EQ):
-            if not isinstance(expr.array, ast.Ident):
-                raise ParseError(
-                    "cannot assign to non-variable array expression",
-                    self._peek(),
-                )
+        if self._check(TokenType.EQ):
             self._advance()
             value = self.parse_expr()
-            self._expect(TokenType.SEMI, "';' after index assignment")
-            return ast.IndexSet(
-                expr.array.name, expr.index, value, expr.line, expr.col
-            )
+            self._expect(TokenType.SEMI, "';' after assignment")
+            
+            if isinstance(expr, ast.Index):
+                if not isinstance(expr.array, ast.Ident):
+                    raise ParseError("cannot assign to non-variable array expression", self._peek())
+                return ast.IndexSet(expr.array.name, expr.index, value, expr.line, expr.col)
+            elif isinstance(expr, ast.FieldAccess):
+                return ast.FieldSet(expr.obj, expr.field, value, expr.line, expr.col)
+            else:
+                raise ParseError("invalid assignment target", self._peek())
 
         self._expect(TokenType.SEMI, "';' after expression")
         return ast.ExprStmt(expr, expr.line, expr.col)
