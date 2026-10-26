@@ -1,0 +1,5 @@
+let name = "stranger";
+if len(args) > 0 {
+    name = args[0];
+}
+print("hello, " + name + "!");

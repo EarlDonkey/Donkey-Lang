@@ -1,0 +1,13 @@
+fn digit_sum(n) -> num {
+    let s = 0;
+    while n > 0 {
+        s = s + n % 10;
+        n = n div 10;
+    }
+    return s;
+}
+
+print(digit_sum(1234));
+print(digit_sum(9999));
+print(digit_sum(100));
+print(digit_sum(7));

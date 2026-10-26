@@ -1,0 +1,43 @@
+fn digit_sum(n) -> num {
+    let s = 0;
+    while n > 0 {
+        s = s + n % 10;
+        n = n div 10;
+    }
+    return s;
+}
+
+fn divisors(n) -> array {
+    let out = [];
+    let d = 1;
+    while d * d <= n {
+        if n % d == 0 {
+            push(out, d);
+            if d * d != n {
+                push(out, n div d);
+            }
+        }
+        d = d + 1;
+    }
+    return out;
+}
+
+fn sum_array(a) -> num {
+    let s = 0;
+    let i = 0;
+    while i < len(a) {
+        s = s + a[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+if len(args) < 1 {
+    print("usage: facts.donk NUMBER");
+} else {
+    let n = num(args[0]);
+    print(n);
+    print(divisors(n));
+    print(sum_array(divisors(n)));
+    print(digit_sum(n));
+}

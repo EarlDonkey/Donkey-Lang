@@ -1,0 +1,70 @@
+// Menu-driven note taker.
+// Usage: python -m donky.run examples/interactive_notes.donk [file]
+//
+// Note: this version can't load existing notes on startup because Donky has
+// no try/catch — reading a missing file kills the program. Save-then-load in
+// one session works: add notes, save, quit, then re-run and add more (the
+// save preserves what's on disk because we join + write).
+
+let path = "notes.donk.txt";
+if len(args) > 0 {
+    path = args[0];
+}
+
+fn save_notes(notes) -> void {
+    write_file(path, join(notes, "\n"));
+}
+
+let notes = [];
+
+let running = true;
+while running {
+    print("");
+    print("=== Notes ===");
+    print("1) add  2) list  3) search  4) save  5) quit");
+    let choice = input("choice: ");
+
+    if choice == "1" {
+        push(notes, input("note: "));
+        print("added (" + str(len(notes)) + " total, unsaved)");
+    } else if choice == "2" {
+        if len(notes) == 0 {
+            print("(empty)");
+        } else {
+            print(str(len(notes)) + " note(s):");
+            let i = 0;
+            while i < len(notes) {
+                print("  " + str(i + 1) + ". " + notes[i]);
+                i = i + 1;
+            }
+        }
+    } else if choice == "3" {
+        let term = input("search: ");
+        let matches = [];
+        let i = 0;
+        while i < len(notes) {
+            if contains(notes[i], term) {
+                push(matches, notes[i]);
+            }
+            i = i + 1;
+        }
+        sort(matches);
+        if len(matches) == 0 {
+            print("no matches");
+        } else {
+            let j = 0;
+            while j < len(matches) {
+                print("  " + matches[j]);
+                j = j + 1;
+            }
+        }
+    } else if choice == "4" {
+        save_notes(notes);
+        print("saved " + str(len(notes)) + " note(s) to " + path);
+    } else if choice == "5" {
+        print("bye");
+        break;
+    } else {
+        print("unknown choice");
+    }
+}

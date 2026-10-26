@@ -1,0 +1,97 @@
+// Menu-driven note taker. Loads existing notes on startup (uses try/catch).
+// Usage: python -m donky.run examples/robust_notes.donk [file]
+
+let path = "notes.donk.txt";
+if len(args) > 0 {
+    path = args[0];
+}
+
+fn load_notes(p) -> array {
+    if !file_exists(p) {
+        return [];
+    }
+    let text = read_file(p);
+    if len(text) == 0 {
+        return [];
+    }
+    return split(text, "\n");
+}
+
+fn save_notes(p, notes) -> void {
+    write_file(p, join(notes, "\n"));
+}
+
+let notes = load_notes(path);
+print("loaded " + str(len(notes)) + " note(s) from " + path);
+
+let running = true;
+while running {
+    print("");
+    print("=== Notes ===");
+    print("1) add  2) list  3) search  4) save  5) delete  6) quit");
+    let choice = input("choice: ");
+
+    if choice == "1" {
+        push(notes, input("note: "));
+        print("added (" + str(len(notes)) + " total)");
+    } else if choice == "2" {
+        if len(notes) == 0 {
+            print("(empty)");
+        } else {
+            let i = 0;
+            for n in notes {
+                print("  " + str(i + 1) + ". " + n);
+                i = i + 1;
+            }
+        }
+    } else if choice == "3" {
+        let term = input("search: ");
+        let matches = [];
+        for n in notes {
+            if contains(n, term) {
+                push(matches, n);
+            }
+        }
+        sort(matches);
+        if len(matches) == 0 {
+            print("no matches");
+        } else {
+            for m in matches {
+                print("  " + m);
+            }
+        }
+    } else if choice == "4" {
+        save_notes(path, notes);
+        print("saved " + str(len(notes)) + " note(s)");
+    } else if choice == "5" {
+        if len(notes) == 0 {
+            print("nothing to delete");
+        } else {
+            let i = 0;
+            for n in notes {
+                print("  " + str(i + 1) + ". " + n);
+                i = i + 1;
+            }
+            let which = num(input("delete #: "));
+            if which < 1 || which > len(notes) {
+                print("invalid");
+            } else {
+                let kept = [];
+                let j = 1;
+                for n in notes {
+                    if j != which {
+                        push(kept, n);
+                    }
+                    j = j + 1;
+                }
+                notes = kept;
+                print("deleted");
+            }
+        }
+    } else if choice == "6" {
+        print("bye");
+        break;
+    } else {
+        print("unknown choice");
+    }
+}

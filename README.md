@@ -851,7 +851,168 @@ Write a program that appends a new line to a file each time it runs. (Hint: read
 
 ---
 
-## 14. Splitting your code into files: import
+## 14. Standard library
+
+Donky ships with five modules of helpers, written in Donky itself. You import them the same way as any file — the path is `lib/` at the repo root.
+
+```donky
+import "lib/list.donk";
+import "lib/format.donk";
+```
+
+### `lib/list.donk` — working with arrays
+
+Higher-order helpers. All take a function as an argument. You write those functions with `fn(...) { ... }` — anonymous functions, defined right in the call.
+
+| Function | What it does |
+|---|---|
+| `map(arr, f)` | Apply `f` to each element, return a new array |
+| `filter(arr, f)` | Keep elements where `f` returns true |
+| `reduce(arr, f, init)` | Fold the array into one value |
+| `sort_by(arr, f)` | Sort ascending by the result of `f`; stable, non-mutating |
+| `reverse(arr)` | New array, reversed |
+| `unique(arr)` | New array, duplicates removed, order preserved |
+| `any(arr, f)` | True if any element satisfies `f` |
+| `all(arr, f)` | True if every element satisfies `f` |
+| `count(arr, f)` | How many elements satisfy `f` |
+
+```donky
+import "lib/list.donk";
+
+let nums = [1, 2, 3, 4, 5];
+
+print(map(nums, fn(x) -> num { return x * x; }));       // [1, 4, 9, 16, 25]
+print(filter(nums, fn(x) -> bool { return x % 2 == 0; })); // [2, 4]
+print(reduce(nums, fn(a, b) -> num { return a + b; }, 0)); // 15
+print(reverse(nums));                                     // [5, 4, 3, 2, 1]
+print(unique([1, 2, 1, 3, 2]));                           // [1, 2, 3]
+```
+
+**Trick:** `sort_by` returns ascending. For descending, negate a numeric key:
+```donky
+sort_by(items, fn(x) -> num { return -x.score; })
+```
+
+### `lib/format.donk` — formatting output
+
+| Function | What it does |
+|---|---|
+| `format_num(x, places)` | Number → string with `places` decimals (truncates) |
+| `repeat(s, n)` | String `s` repeated `n` times |
+| `pad_left(s, width, ch)` | Pad `s` on the left with `ch` until `width` wide |
+| `pad_right(s, width, ch)` | Pad on the right |
+
+```donky
+import "lib/format.donk";
+
+print(format_num(10 / 3, 2));       // "3.33"
+print(format_num(-0.5, 3));         // "-0.500"
+print(pad_left("42", 5, " "));      // "   42"
+print(pad_left("42", 5, "0"));      // "00042"
+print(repeat("=", 10));             // "=========="
+```
+
+**Note:** `format_num` truncates rather than rounds. `format_num(3.999, 2)` gives `"3.99"`. If you need rounding, that's a future feature.
+
+### `lib/strings.donk` — string helpers
+
+| Function | What it does |
+|---|---|
+| `starts_with(s, prefix)` | True if `s` begins with `prefix` |
+| `ends_with(s, suffix)` | True if `s` ends with `suffix` |
+| `slice(s, start, end)` | Substring from `start` (inclusive) to `end` (exclusive) |
+| `index_of(s, needle)` | Position of first `needle` in `s`, or -1 |
+
+```donky
+import "lib/strings.donk";
+
+print(starts_with("hello", "he"));  // true
+print(ends_with("hello", "lo"));    // true
+print(slice("hello", 1, 4));        // "ell"
+print(index_of("hello", "ll"));     // 2
+print(index_of("hello", "zz"));     // -1
+```
+
+### `lib/csv.donk` — reading and writing CSV
+
+| Function | What it does |
+|---|---|
+| `parse_line(line)` | Split one CSV line into an array of strings |
+| `format_line(fields)` | Join an array of strings into a CSV line |
+| `parse_table(text)` | Parse a whole CSV file body into an array of rows |
+| `format_table(rows)` | Format an array of rows back into a CSV body |
+
+```donky
+import "lib/csv.donk";
+
+let rows = parse_table(read_file("data.csv"));
+for row in rows {
+    print(row[0] + " has " + row[1] + " items");
+}
+```
+
+**Limitation:** no quoted fields in v1. Values containing commas will be split incorrectly.
+
+### `lib/math.donk` — numeric helpers
+
+| Function | What it does |
+|---|---|
+| `min(a, b)` | The smaller of two numbers |
+| `max(a, b)` | The larger |
+| `abs(n)` | Absolute value |
+| `pow(base, exp)` | Integer exponent (base^exp) |
+| `sqrt(n)` | Square root (Newton's method); throws on negative |
+
+```donky
+import "lib/math.donk";
+
+print(min(3, 7));       // 3
+print(abs(-5));         // 5
+print(pow(2, 10));      // 1024
+print(sqrt(16));        // 4.0
+```
+
+### Combining modules
+
+A real program often imports several:
+
+```donky
+import "lib/list.donk";
+import "lib/format.donk";
+
+let scores = [72, 95, 88, 60, 91];
+let sorted = reverse(sort_by(scores, fn(x) -> num { return x; }));
+for s in sorted {
+    print(pad_left(str(s), 4, " "));
+}
+// Output:
+//   95
+//   91
+//   88
+//   72
+//   60
+```
+
+### Writing your own library
+
+Any `.donk` file can be imported. Put reusable functions in `lib/` (or anywhere), import from your program:
+
+`lib/mystuff.donk`:
+```donky
+fn greet(name) -> str {
+    return "Hello, " + name + "!";
+}
+```
+
+`main.donk`:
+```donky
+import "lib/mystuff.donk";
+print(greet("Ada"));   // Hello, Ada!
+```
+
+**Rules:** `import` must be at the top level. Paths are relative to the importing file. The same file imported twice is only loaded once. Give your functions unique names — there's no namespace isolation yet.
+
+## 15. Splitting your code into files: import
 
 When a program gets big, put helper functions in a separate file and import it.
 
@@ -899,7 +1060,7 @@ Make a `lib/strings.donk` with helper functions like `starts_with(s, prefix) -> 
 
 ---
 
-## 15. A complete program: a notes app
+## 16. A complete program: a notes app
 
 Here's a real, useful program that uses everything above. Save as `notes.donk`:
 
@@ -983,7 +1144,7 @@ Run it. Add notes. Save. Quit. Run it again. **Your notes are still there.** Tha
 
 ---
 
-## 16. Cheat sheet
+## 17. Cheat sheet
 
 Keep this handy.
 
@@ -1109,7 +1270,7 @@ Return types: `num`, `str`, `bool`, `array`, `map`, `any`, `void`.
 
 ---
 
-## 17. Troubleshooting
+## 18. Troubleshooting
 
 **"parse error: expected ';'"**
 You forgot a semicolon at the end of a statement. Check the line and column in the error — they point to where Donky got confused, usually right after where the `;` should be.

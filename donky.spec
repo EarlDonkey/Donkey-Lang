@@ -1,5 +1,5 @@
 # PyInstaller spec. Build with: pyinstaller donky.spec
-# Result: dist/donky/donky.exe + dist/donky/examples/ + dist/donky/docs/
+# Result: dist/donky/donky.exe + dist/donky/examples/ + dist/donky/lib/ + dist/donky/docs/
 
 a = Analysis(
     ['entry.py'],
@@ -7,7 +7,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('examples', 'examples'),
-        ('docs', 'docs'),
+        ('lib', 'lib'),
     ],
     hiddenimports=[],
     hookspath=[],

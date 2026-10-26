@@ -1,0 +1,32 @@
+let a = [1, 2, 3];
+print(a);
+print(a[0]);
+print(a[2]);
+
+a[0] = 100;
+print(a);
+
+print(len(a));
+push(a, 4);
+print(a);
+print(len(a));
+
+let x = pop(a);
+print(x);
+print(a);
+
+let nums = [];
+let i = 0;
+while i < 5 {
+    push(nums, i * i);
+    i = i + 1;
+}
+print(nums);
+
+let sum = 0;
+let j = 0;
+while j < len(nums) {
+    sum = sum + nums[j];
+    j = j + 1;
+}
+print(sum);
