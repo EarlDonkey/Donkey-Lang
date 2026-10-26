@@ -1,0 +1,155 @@
+// examples/adventure2.donk
+
+let rooms = {
+    "entrance": {
+        "desc": "A mossy stone archway. A path leads north.",
+        "north": "hallway", "south": ""
+    },
+    "hallway": {
+        "desc": "A narrow hallway lit by flickering torches. A door is east, a path south.",
+        "north": "", "south": "entrance", "east": "library", "west": "armory"
+    },
+    "library": {
+        "desc": "Dusty bookshelves. A glowing chest sits in the corner.",
+        "west": "hallway"
+    },
+    "armory": {
+        "desc": "Racks of rusted swords. A rusty sword leans against the wall.",
+        "east": "hallway"
+    },
+    "treasury": {
+        "desc": "A vault of gold. The exit to the east is open!",
+        "east": "exit"
+    },
+    "exit": {
+        "desc": "You step into sunlight. You are free.",
+        "": ""
+    }
+};
+
+let player = {
+    "room": "entrance",
+    "inventory": [],
+    "health": 10,
+    "turn": 0,
+    "chest_open": false
+};
+
+let aliases = {
+    "n": "north", "s": "south", "e": "east", "w": "west",
+    "l": "look", "i": "inventory", "q": "quit"
+};
+
+fn resolve_dir(word) -> str {
+    if contains(aliases, word) {
+        return aliases[word];
+    }
+    return word;
+}
+
+fn has_item(name) -> bool {
+    return contains(player["inventory"], name);
+}
+
+fn roll_dice() -> num {
+    // Deterministic "random": uses turn number so outcomes are reproducible
+    let n = (player["turn"] * 7919 + 13) % 6;
+    return n + 1;
+}
+
+print("=== THE DONKY DUNGEON (v2) ===");
+print("You awaken in a cold stone chamber.");
+print("Type 'help' for commands.");
+print("");
+
+let running = true;
+
+while running {
+    player["turn"] = player["turn"] + 1;
+    let cmd = input("> ");
+    let parts = split(cmd, " ");
+    let verb = parts[0];
+    
+    if len(cmd) == 0 {
+        // do nothing
+    } else if verb == "quit" || verb == "q" {
+        print("Farewell, adventurer.");
+        running = false;
+    } else if verb == "help" {
+        print("Commands: look, go <dir>, take <item>, use <item>, inventory, quit");
+        print("Shortcuts: n, s, e, w, l, i, q");
+    } else if verb == "look" || verb == "l" {
+        let room = rooms[player["room"]];
+        print(room["desc"]);
+    } else if verb == "inventory" || verb == "i" {
+        if len(player["inventory"]) == 0 {
+            print("You are empty-handed.");
+        } else {
+            print("You carry: " + join(player["inventory"], ", "));
+        }
+    } else if verb == "go" {
+        if len(parts) < 2 {
+            print("Go where? (north, south, east, west)");
+        } else {
+            let dir = resolve_dir(parts[1]);
+            let room = rooms[player["room"]];
+            if contains(room, dir) && room[dir] != "" {
+                player["room"] = room[dir];
+                print("You go " + dir + ".");
+                if player["room"] == "treasury" {
+                    print("A heavy chest sits here. The east door is locked.");
+                } else if player["room"] == "exit" {
+                    print("You escape the dungeon with " + str(player["health"]) + " HP!");
+                    print("=== YOU WIN ===");
+                    running = false;
+                }
+            } else {
+                print("You can't go that way.");
+            }
+        }
+    } else if verb == "take" {
+        if len(parts) < 2 {
+            print("Take what?");
+        } else {
+            let item = parts[1];
+            if player["room"] == "armory" && item == "sword" && !has_item("sword") {
+                push(player["inventory"], "sword");
+                print("You take the rusty sword. It feels heavy.");
+            } else if player["room"] == "library" && item == "chest" {
+                print("The chest is locked. You need a key.");
+            } else {
+                print("There is no " + item + " here.");
+            }
+        }
+    } else if verb == "open" {
+        if player["room"] == "library" && len(parts) > 1 && parts[1] == "chest" {
+            if has_item("key") {
+                player["chest_open"] = true;
+                push(player["inventory"], "potion");
+                print("You unlock the chest and find a healing potion!");
+            } else {
+                print("The chest is locked. You need a key.");
+            }
+        } else {
+            print("Nothing to open here.");
+        }
+    } else if verb == "use" {
+        if len(parts) < 2 {
+            print("Use what?");
+        } else if parts[1] == "potion" && has_item("potion") {
+            player["health"] = player["health"] + 5;
+            print("You drink the potion. Health: " + str(player["health"]));
+        } else {
+            print("You can't use that here.");
+        }
+    } else if verb == "attack" {
+        if has_item("sword") {
+            let dmg = roll_dice();
+            print("You swing the sword and deal " + str(dmg) + " damage!");
+        } else {
+            print("You have no weapon.");
+        }
+    } else {
+        print("Unknown command: " + verb);
+    }
+}

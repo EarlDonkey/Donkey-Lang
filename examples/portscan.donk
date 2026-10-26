@@ -1,0 +1,35 @@
+// examples/portscan.donk
+// A real, multithreaded TCP port scanner written in Donky.
+
+if len(args) < 1 {
+    print("Usage: donky portscan.donk <IP> [start_port] [end_port]");
+    print("Example: donky portscan.donk 127.0.0.1 1 1024");
+} else {
+    let target = args[0];
+    let start_p = 1;
+    let end_p = 1024;
+    
+    if len(args) >= 2 { start_p = num(args[1]); }
+    if len(args) >= 3 { end_p = num(args[2]); }
+    
+    print("Scanning ${target} from port ${start_p} to ${end_p}...");
+    
+    fn check_port(port) -> void {
+        // 0.5 second timeout prevents hanging on filtered ports
+        let is_open = tcp_connect(target, port, 0.5);
+        if is_open {
+            print("[+] Port ${port} is OPEN");
+        }
+    }
+    
+    let p = start_p;
+    while p <= end_p {
+        // Spawn a new thread for every port to scan at lightning speed
+        spawn(fn() -> void { check_port(p); });
+        p = p + 1;
+    }
+    
+    // Give the threads a moment to finish before the program exits
+    sleep(2.0);
+    print("Scan complete.");
+}

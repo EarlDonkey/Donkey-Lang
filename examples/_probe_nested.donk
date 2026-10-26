@@ -1,0 +1,5 @@
+fn outer() -> num {
+    fn inner() -> num { return 1; }
+    return inner();
+}
+print(outer());

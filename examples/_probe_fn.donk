@@ -1,0 +1,4 @@
+let f = fn(x) -> num { return x * 2; };
+print(f(21));
+let g = fn() -> num { return 7; };
+print(g());

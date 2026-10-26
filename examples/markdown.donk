@@ -1,0 +1,55 @@
+// compiler/markdown.donk
+
+fn parse_markdown(md) -> str {
+    let lines = split(md, "\n");
+    let html = "";
+    
+    for line in lines {
+        let l = trim(line);
+        if len(l) == 0 {
+            html = html + "<br>\n";
+        } else if starts_with(l, "# ") {
+            html = html + "<h1>" + slice(l, 2, len(l)) + "</h1>\n";
+        } else if starts_with(l, "## ") {
+            html = html + "<h2>" + slice(l, 3, len(l)) + "</h2>\n";
+        } else if starts_with(l, "### ") {
+            html = html + "<h3>" + slice(l, 4, len(l)) + "</h3>\n";
+        } else {
+            // Process inline formatting (Bold and Links)
+            let formatted = l;
+            
+            // Replace links [text](url) -> <a href="url">text</a>
+            while contains(formatted, "[") && contains(formatted, "](") && contains(formatted, ")") {
+                let start = index_of(formatted, "[");
+                let mid = index_of(formatted, "](");
+                let end = index_of(formatted, ")");
+                
+                let text = slice(formatted, start + 1, mid);
+                let url = slice(formatted, mid + 2, end);
+                
+                let before = slice(formatted, 0, start);
+                let after = slice(formatted, end + 1, len(formatted));
+                
+                formatted = before + "<a href=\"" + url + "\">" + text + "</a>" + after;
+            }
+            
+            // Replace bold **text** -> <strong>text</strong>
+            while contains(formatted, "**") {
+                let start = index_of(formatted, "**");
+                let end = index_of(slice(formatted, start + 2, len(formatted)), "**");
+                if end == -1 { break; }
+                let actual_end = start + 2 + end;
+                
+                let text = slice(formatted, start + 2, actual_end);
+                let before = slice(formatted, 0, start);
+                let after = slice(formatted, actual_end + 2, len(formatted));
+                
+                formatted = before + "<strong>" + text + "</strong>" + after;
+            }
+            
+            html = html + "<p>" + formatted + "</p>\n";
+        }
+    }
+    
+    return html;
+}

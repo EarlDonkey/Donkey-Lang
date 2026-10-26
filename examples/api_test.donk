@@ -1,0 +1,11 @@
+import "../lib/json.donk";
+import "../lib/strings.donk";
+
+print("Fetching live data from GitHub...");
+let raw = http_get("https://api.github.com/users/torvalds");
+let data = parse_json(raw);
+
+print("Login: " + data["login"]);
+print("Name: " + data["name"]);
+print("Public repos: " + str(data["public_repos"]));
+print("Followers: " + str(data["followers"]));

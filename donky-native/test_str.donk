@@ -1,0 +1,4 @@
+let first = "Donky ";
+let second = "Native";
+let msg = first + second;
+print(msg);

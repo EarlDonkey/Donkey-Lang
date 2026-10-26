@@ -15,6 +15,7 @@ pub enum Expr {
     InterpolatedString(Vec<Expr>),
     StructInit(String, Vec<(String, Expr)>),
     FieldAccess(Box<Expr>, String),
+    Function(Vec<String>, Box<Stmt>),   // <--- NEW: anonymous function / lambda
 }
 
 #[derive(Debug, Clone)]
@@ -34,7 +35,7 @@ pub enum Stmt {
     Break,
     Continue,
     StructDef(String, Vec<(String, String)>),
-    Try(Box<Stmt>, String, Box<Stmt>),   // <--- NEW
-    Throw(Expr),                         // <--- NEW
-    Import(String),                      // <--- NEW
+    Try(Box<Stmt>, String, Box<Stmt>),
+    Throw(Expr),
+    Import(String),
 }

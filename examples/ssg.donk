@@ -1,0 +1,31 @@
+// compiler/ssg.donk
+import "markdown.donk";
+
+fn build_site() -> void {
+    mkdir("public");
+    
+    let files = list_dir("content");
+    for file in files {
+        if ends_with(file, ".md") {
+            print("Processing: " + file);
+            
+            let md = read_file("content/" + file);
+            let body = parse_markdown(md);
+            
+            let title = split(file, ".")[0];
+            
+            let html = "<!DOCTYPE html>\n<html>\n<head>\n";
+            html = html + "<title>" + title + "</title>\n";
+            html = html + "<style>body{font-family:sans-serif;max-width:600px;margin:40px auto;line-height:1.6;background:#1e1e1e;color:#d4d4d4;} a{color:#4ec9b0;} h1{color:#ce9178;}</style>\n";
+            html = html + "</head>\n<body>\n";
+            html = html + body;
+            html = html + "\n</body>\n</html>";
+            
+            let out_name = split(file, ".")[0] + ".html";
+            write_file("public/" + out_name, html);
+        }
+    }
+    print("Site built successfully in /public!");
+}
+
+build_site();

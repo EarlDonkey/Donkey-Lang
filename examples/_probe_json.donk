@@ -1,0 +1,13 @@
+import "../lib/json.donk";
+
+print("A: parsing empty array");
+let a = parse_json("[]");
+print("A done: len=" + str(len(a)));
+
+print("B: parsing tiny array");
+let b = parse_json("[1,2,3]");
+print("B done: " + str(b));
+
+print("C: parsing array of objects");
+let c = parse_json("[{\"n\":1},{\"n\":2}]");
+print("C done: len=" + str(len(c)));

@@ -1,0 +1,61 @@
+// examples/adventure.donk
+
+print("=== The Donky Dungeon ===");
+print("You are in a dark room. There is a door to the north.");
+print("Type 'help' for commands. Type 'quit' to exit.");
+print("");
+
+let player = { "room": "start", "has_key": false };
+let running = true;
+
+while running {
+    let cmd = input("> ");
+    
+    if cmd == "quit" {
+        print("Goodbye!");
+        running = false;
+    } else if cmd == "help" {
+        print("Commands: look, go north, take key, inventory, quit");
+    } else if cmd == "look" {
+        if player["room"] == "start" {
+            print("You are in a dark room. There is a door to the north.");
+        } else if player["room"] == "hallway" {
+            print("You are in a narrow hallway. A shiny key is on the floor.");
+            print("There is a locked door to the east.");
+        }
+    } else if cmd == "go north" {
+        if player["room"] == "start" {
+            player["room"] = "hallway";
+            print("You walk north into the hallway.");
+        } else {
+            print("You can't go that way.");
+        }
+    } else if cmd == "go east" {
+        if player["room"] == "hallway" {
+            if player["has_key"] {
+                print("You unlock the door with the key and escape!");
+                print("=== YOU WIN ===");
+                running = false;
+            } else {
+                print("The door is locked. You need a key.");
+            }
+        } else {
+            print("You can't go that way.");
+        }
+    } else if cmd == "take key" {
+        if player["room"] == "hallway" && !player["has_key"] {
+            player["has_key"] = true;
+            print("You picked up the key.");
+        } else {
+            print("There is nothing to take.");
+        }
+    } else if cmd == "inventory" {
+        if player["has_key"] {
+            print("You have: a shiny key.");
+        } else {
+            print("You are empty-handed.");
+        }
+    } else if len(cmd) > 0 {
+        print("Unknown command.");
+    }
+}

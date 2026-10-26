@@ -1,0 +1,126 @@
+// examples/rogue.donk
+
+let width = 15;
+let height = 10;
+let player = { "x": 2, "y": 2, "hp": 10 };
+let enemies = [];
+let map = [];
+
+// 1. Generate Map
+fn generate_map() -> void {
+    let y = 0;
+    while y < height {
+        let row = [];
+        let x = 0;
+        while x < width {
+            if x == 0 || x == width - 1 || y == 0 || y == height - 1 {
+                push(row, "#"); // Walls
+            } else {
+                if random(10) == 0 {
+                    push(row, "#"); // Random pillars
+                } else {
+                    push(row, "."); // Floor
+                }
+            }
+            x = x + 1;
+        }
+        push(map, row);
+        y = y + 1;
+    }
+}
+
+// 2. Render Map
+fn render() -> void {
+    clear_screen();
+    print("=== DONKY ROGUE ===");
+    print("HP: " + str(player["hp"]) + " | Enemies left: " + str(len(enemies)));
+    
+    let display = [];
+    let y = 0;
+    while y < height {
+        let row = [];
+        let x = 0;
+        while x < width {
+            push(row, map[y][x]);
+            x = x + 1;
+        }
+        push(display, row);
+        y = y + 1;
+    }
+    
+    // Draw enemies
+    for e in enemies {
+        let row = display[e["y"]];  // <--- FIX 1
+        row[e["x"]] = "E";           // <--- FIX 1
+    }
+    
+    // Draw player
+    let prow = display[player["y"]]; // <--- FIX 2
+    prow[player["x"]] = "@";         // <--- FIX 2
+    
+    for row in display {
+        print(join(row, ""));
+    }
+}
+
+// 3. Move Player
+fn move_player(dx, dy) -> void {
+    let nx = player["x"] + dx;
+    let ny = player["y"] + dy;
+    
+    if nx < 0 || nx >= width || ny < 0 || ny >= height { return; }
+    
+    let hit_enemy = false;
+    let new_enemies = [];
+    for e in enemies {
+        if e["x"] == nx && e["y"] == ny {
+            player["hp"] = player["hp"] - 2;
+            hit_enemy = true;
+        } else {
+            push(new_enemies, e);
+        }
+    }
+    enemies = new_enemies;
+    
+    // Collision check (only 1D array access, so it's fine)
+    let target_row = map[ny];
+    if target_row[nx] == "#" { return; }
+    
+    if !hit_enemy {
+        player["x"] = nx;
+        player["y"] = ny;
+    }
+}
+// 4. Game Loop
+generate_map();
+
+// Spawn 3 enemies in random spots
+let i = 0;
+while i < 3 {
+    let ex = random(width - 2) + 1;
+    let ey = random(height - 2) + 1;
+    if map[ey][ex] == "." {
+        push(enemies, { "x": ex, "y": ey });
+        i = i + 1;
+    }
+}
+
+let running = true;
+while running {
+    render();
+    
+    if player["hp"] <= 0 {
+        print("=== YOU DIED ===");
+        running = false;
+    } else if len(enemies) == 0 {
+        print("=== YOU WIN ===");
+        running = false;
+    } else {
+        let cmd = input("WASD to move, q to quit: ");
+        if cmd == "w" { move_player(0, -1); }
+        else if cmd == "s" { move_player(0, 1); }
+        else if cmd == "a" { move_player(-1, 0); }
+        else if cmd == "d" { move_player(1, 0); }
+        else if cmd == "q" { running = false; }
+    }
+}

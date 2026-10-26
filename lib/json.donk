@@ -1,0 +1,156 @@
+// lib/json.donk — pure-Donky recursive descent JSON parser.
+//
+// Works entirely in byte positions to stay O(n). Every peek is byte_at(),
+// which is a native O(1) builtin. Structural characters in JSON are all
+// ASCII (", {, }, [, ], :, ,, digits), so byte positions never split a
+// multi-byte UTF-8 codepoint at the structural level. Text content of
+// strings is accumulated as raw bytes and re-encoded with bytes_to_str,
+// which preserves UTF-8 correctly.
+//
+// No dependency on lib/strings.donk.
+
+fn json_new_state(src) -> map {
+    return { "src": src, "pos": 0, "len": len(src) };
+}
+
+fn json_peek(s) -> num {
+    return byte_at(s["src"], s["pos"]);
+}
+
+fn json_skip_ws(s) -> void {
+    while s["pos"] < s["len"] {
+        let b = byte_at(s["src"], s["pos"]);
+        // space, \n, \r, \t
+        if b == 32 || b == 10 || b == 13 || b == 9 {
+            s["pos"] = s["pos"] + 1;
+        } else {
+            break;
+        }
+    }
+}
+
+fn json_parse_string(s) -> str {
+    // Skip opening quote (byte 34)
+    s["pos"] = s["pos"] + 1;
+    let bytes = [];
+    while s["pos"] < s["len"] {
+        let b = byte_at(s["src"], s["pos"]);
+        if b == 34 { // closing "
+            s["pos"] = s["pos"] + 1;
+            return bytes_to_str(bytes);
+        }
+        if b == 92 { // backslash
+            s["pos"] = s["pos"] + 1;
+            let e = byte_at(s["src"], s["pos"]);
+            if e == 110 { push(bytes, 10); }        // \n
+            else if e == 116 { push(bytes, 9); }    // \t
+            else if e == 114 { push(bytes, 13); }   // \r
+            else if e == 34 { push(bytes, 34); }    // \"
+            else if e == 92 { push(bytes, 92); }    // \\
+            else if e == 47 { push(bytes, 47); }    // \/
+            else { push(bytes, e); }                // fallback: pass through
+            s["pos"] = s["pos"] + 1;
+        } else {
+            push(bytes, b);
+            s["pos"] = s["pos"] + 1;
+        }
+    }
+    throw "Unterminated string in JSON";
+}
+
+fn json_parse_number(s) -> num {
+    let start = s["pos"];
+    while s["pos"] < s["len"] {
+        let b = byte_at(s["src"], s["pos"]);
+        // digits 0-9, -, +, ., e, E
+        if (b >= 48 && b <= 57) || b == 45 || b == 43 || b == 46 || b == 101 || b == 69 {
+            s["pos"] = s["pos"] + 1;
+        } else {
+            break;
+        }
+    }
+    let text = byte_substr(s["src"], start, s["pos"]);
+    return num(text);
+}
+
+fn json_parse_array(s) -> array {
+    s["pos"] = s["pos"] + 1; // skip [
+    let arr = [];
+    json_skip_ws(s);
+    if json_peek(s) == 93 { // ]
+        s["pos"] = s["pos"] + 1;
+        return arr;
+    }
+    while true {
+        push(arr, json_parse_value(s));
+        json_skip_ws(s);
+        let b = json_peek(s);
+        s["pos"] = s["pos"] + 1;
+        if b == 93 { return arr; }       // ]
+        if b != 44 { throw "Expected , or ] in JSON array"; } // ,
+    }
+}
+
+fn json_parse_object(s) -> map {
+    s["pos"] = s["pos"] + 1; // skip {
+    let obj = {};
+    json_skip_ws(s);
+    if json_peek(s) == 125 { // }
+        s["pos"] = s["pos"] + 1;
+        return obj;
+    }
+    while true {
+        json_skip_ws(s);
+        let key = json_parse_string(s);
+        json_skip_ws(s);
+        if json_peek(s) != 58 { throw "Expected : in JSON object"; } // :
+        s["pos"] = s["pos"] + 1;
+        let val = json_parse_value(s);
+        obj[key] = val;
+        json_skip_ws(s);
+        let b = json_peek(s);
+        s["pos"] = s["pos"] + 1;
+        if b == 125 { return obj; }      // }
+        if b != 44 { throw "Expected , or } in JSON object"; } // ,
+    }
+}
+
+fn json_parse_value(s) -> any {
+    json_skip_ws(s);
+    if s["pos"] >= s["len"] { throw "Unexpected end of JSON"; }
+    let b = json_peek(s);
+
+    if b == 34 { return json_parse_string(s); }     // "
+    if b == 123 { return json_parse_object(s); }    // {
+    if b == 91 { return json_parse_array(s); }      // [
+
+    // true / false / null — check exact bytes before advancing
+    if b == 116 && s["pos"] + 4 <= s["len"]
+        && byte_substr(s["src"], s["pos"], s["pos"] + 4) == "true" {
+        s["pos"] = s["pos"] + 4;
+        return true;
+    }
+    if b == 102 && s["pos"] + 5 <= s["len"]
+        && byte_substr(s["src"], s["pos"], s["pos"] + 5) == "false" {
+        s["pos"] = s["pos"] + 5;
+        return false;
+    }
+    if b == 110 && s["pos"] + 4 <= s["len"]
+        && byte_substr(s["src"], s["pos"], s["pos"] + 4) == "null" {
+        s["pos"] = s["pos"] + 4;
+        return "";
+    }
+
+    if (b >= 48 && b <= 57) || b == 45 {  // digit or -
+        return json_parse_number(s);
+    }
+
+    throw "Unexpected character in JSON at position " + str(s["pos"]);
+}
+
+fn parse_json(src) -> any {
+    let s = json_new_state(src);
+    let val = json_parse_value(s);
+    json_skip_ws(s);
+    return val;
+}

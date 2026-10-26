@@ -9,7 +9,6 @@ use std::io::{Read, Write};
 use crate::ast::{Expr, Stmt};
 use crate::lexer::TokenType;
 
-// --- Global Socket Registry ---
 static CLIENTS: OnceLock<Mutex<HashMap<usize, TcpStream>>> = OnceLock::new();
 static SERVERS: OnceLock<Mutex<HashMap<usize, TcpListener>>> = OnceLock::new();
 static COUNTER: OnceLock<Mutex<usize>> = OnceLock::new();
@@ -179,26 +178,11 @@ impl Interpreter {
                         if let Value::Number(n) = index {
                             let i = n as usize;
                             let mut borrowed = arr.borrow_mut();
-                            if i < borrowed.len() {
-                                borrowed[i] = value;
-                            } else {
-                                return Err(format!("Index {} out of range", i));
-                            }
-                        } else {
-                            return Err("Array index must be a number".to_string());
-                        }
+                            if i < borrowed.len() { borrowed[i] = value; } else { return Err(format!("Index {} out of range", i)); }
+                        } else { return Err("Array index must be a number".to_string()); }
                     }
-                    Value::Map(map) => {
-                        let key = MapKey::from_value(&index)?;
-                        map.borrow_mut().insert(key, value);
-                    }
-                    Value::Struct(_, fields) => {
-                        if let Value::String(k) = index {
-                            fields.borrow_mut().insert(k, value);
-                        } else {
-                            return Err("Struct index must be a string".to_string());
-                        }
-                    }
+                    Value::Map(map) => { let key = MapKey::from_value(&index)?; map.borrow_mut().insert(key, value); }
+                    Value::Struct(_, fields) => { if let Value::String(k) = index { fields.borrow_mut().insert(k, value); } else { return Err("Struct index must be a string".to_string()); } }
                     _ => return Err("Can only index-assign arrays, maps, or structs".to_string()),
                 }
                 Ok(ControlFlow::Normal)
@@ -279,6 +263,7 @@ impl Interpreter {
             Expr::Number(n) => Ok(Value::Number(n)),
             Expr::String(s) => Ok(Value::String(s)),
             Expr::Bool(b) => Ok(Value::Bool(b)),
+            Expr::Function(params, body) => Ok(Value::Function { params, body }),
             Expr::Ident(name) => self.env.get(&name),
             Expr::InterpolatedString(parts) => {
                 let mut res = String::new();
@@ -297,7 +282,14 @@ impl Interpreter {
                         Some(v) => Ok(v.clone()),
                         None => Err(format!("Field '{}' not found", field)),
                     },
-                    _ => Err("Can only access fields on structs".to_string()),
+                    Value::Map(map) => {
+                        let key = MapKey::String(field.clone());
+                        match map.borrow().get(&key) {
+                            Some(v) => Ok(v.clone()),
+                            None => Err(format!("Key '{}' not found in map", field)),
+                        }
+                    }
+                    _ => Err("Can only access fields on structs or maps".to_string()),
                 }
             }
             Expr::Array(elements) => {
@@ -322,14 +314,8 @@ impl Interpreter {
                         if let Value::Number(n) = index_val {
                             let i = n as usize;
                             let borrowed = arr.borrow();
-                            if i < borrowed.len() {
-                                Ok(borrowed[i].clone())
-                            } else {
-                                Err(format!("Index {} out of range", i))
-                            }
-                        } else {
-                            Err("Array index must be a number".to_string())
-                        }
+                            if i < borrowed.len() { Ok(borrowed[i].clone()) } else { Err(format!("Index {} out of range", i)) }
+                        } else { Err("Array index must be a number".to_string()) }
                     }
                     Value::Map(map) => {
                         let key = MapKey::from_value(&index_val)?;
@@ -345,9 +331,7 @@ impl Interpreter {
                                 Some(v) => Ok(v.clone()),
                                 None => Err(format!("Key '{}' not found in struct", k)),
                             }
-                        } else {
-                            Err("Struct index must be a string".to_string())
-                        }
+                        } else { Err("Struct index must be a string".to_string()) }
                     }
                     Value::String(s) => {
                         if let Value::Number(n) = index_val {
@@ -355,12 +339,8 @@ impl Interpreter {
                             if i < s.len() {
                                 let ch = s.chars().nth(i).unwrap();
                                 Ok(Value::String(ch.to_string()))
-                            } else {
-                                Err(format!("String index {} out of range", i))
-                            }
-                        } else {
-                            Err("String index must be a number".to_string())
-                        }
+                            } else { Err(format!("String index {} out of range", i)) }
+                        } else { Err("String index must be a number".to_string()) }
                     }
                     _ => Err(format!("Cannot index type '{}'", target_val.to_string())),
                 }
@@ -380,7 +360,7 @@ impl Interpreter {
                 if name == "tcp_accept" {
                     let id = self.evaluate(args[0].clone())?;
                     if let Value::Number(id_n) = id {
-                        let mut servers = get_servers().lock().unwrap();
+                        let servers = get_servers().lock().unwrap();
                         if let Some(l) = servers.get(&(id_n as usize)) {
                             match l.accept() {
                                 Ok((s, _)) => {
@@ -433,50 +413,84 @@ impl Interpreter {
                 if name == "http_get" {
                     let url = self.evaluate(args[0].clone())?;
                     if let Value::String(u) = url {
-                        let parts: Vec<&str> = u.trim_start_matches("http://").splitn(2, '/').collect();
-                        let host = parts[0];
-                        let path = if parts.len() > 1 { format!("/{}", parts[1]) } else { "/".to_string() };
-                        let host_port = if host.contains(':') { host.to_string() } else { format!("{}:80", host) };
-                        
-                        if let Ok(mut s) = TcpStream::connect(host_port) {
-                            let req = format!("GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: Donky-Rust\r\n\r\n", path, host);
-                            let _ = s.write_all(req.as_bytes());
-                            let mut res = String::new();
-                            let _ = s.read_to_string(&mut res);
-                            
-                            let body_parts: Vec<&str> = res.splitn(2, "\r\n\r\n").collect();
-                            if body_parts.len() > 1 {
-                                let mut body = body_parts[1].to_string();
-                                
-                                if res.to_lowercase().contains("transfer-encoding: chunked") {
-                                    let mut parsed_body = String::new();
-                                    let mut lines = body.split("\r\n");
-                                    while let Some(line) = lines.next() {
-                                        if let Ok(size) = usize::from_str_radix(line, 16) {
-                                            if size == 0 { break; }
-                                            if let Some(data) = lines.next() {
-                                                parsed_body.push_str(data);
-                                            }
-                                        }
-                                    }
-                                    body = parsed_body;
+                        match ureq::get(&u).call() {
+                            Ok(resp) => {
+                                match resp.into_string() {
+                                    Ok(body) => return Ok(Value::String(body)),
+                                    Err(e) => return Err(format!("http_get body failed: {}", e)),
                                 }
-                                return Ok(Value::String(body));
                             }
-                            return Ok(Value::String(res));
+                            Err(e) => return Err(format!("http_get failed: {}", e)),
                         }
-                        return Err("http_get failed to connect".to_string());
                     }
                     return Err("http_get expects string URL".to_string());
                 }
                 if name == "char_code" {
                     if let Value::String(s) = self.evaluate(args[0].clone())? {
                         let bytes = s.as_bytes();
-                        if bytes.len() == 1 {
-                            return Ok(Value::Number(bytes[0] as f64));
-                        }
+                        if bytes.len() == 1 { return Ok(Value::Number(bytes[0] as f64)); }
                     }
                     return Err("char_code() expects single character".to_string());
+                }
+                if name == "clear_screen" {
+                    print!("\x1b[2J\x1b[1;1H");
+                    use std::io::Write;
+                    std::io::stdout().flush().unwrap();
+                    return Ok(Value::Null);
+                }
+                if name == "str_eq" {
+                    let a = self.evaluate(args[0].clone())?;
+                    let b = self.evaluate(args[1].clone())?;
+                    return Ok(Value::Bool(a.to_string() == b.to_string()));
+                }
+                if name == "print_char" {
+                    let c = self.evaluate(args[0].clone())?;
+                    if let Value::Number(n) = c {
+                        print!("{}", n as u8 as char);
+                        use std::io::Write;
+                        std::io::stdout().flush().unwrap();
+                    }
+                    return Ok(Value::Null);
+                }
+                if name == "print_str" {
+                    let s = self.evaluate(args[0].clone())?;
+                    print!("{}", s.to_string());
+                    use std::io::Write;
+                    std::io::stdout().flush().unwrap();
+                    return Ok(Value::Null);
+                }
+                if name == "read_line" {
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input).unwrap();
+                    return Ok(Value::String(input.trim().to_string()));
+                }
+                if name == "random" {
+                    let max = if args.len() > 0 {
+                        if let Value::Number(n) = self.evaluate(args[0].clone())? { n as u64 } else { 100 }
+                    } else { 100 };
+                    use std::time::{SystemTime, UNIX_EPOCH};
+                    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos() as u64;
+                    let rand_val = (nanos * 1103515245 + 12345) % max;
+                    return Ok(Value::Number(rand_val as f64));
+                }
+                if name == "list_dir" {
+                    if let Value::String(p) = self.evaluate(args[0].clone())? {
+                        let mut files = Vec::new();
+                        if let Ok(entries) = fs::read_dir(&p) {
+                            for entry in entries.flatten() {
+                                if let Ok(name) = entry.file_name().into_string() { files.push(Value::String(name)); }
+                            }
+                        }
+                        return Ok(Value::Array(Rc::new(RefCell::new(files))));
+                    }
+                    return Err("list_dir() expects string".to_string());
+                }
+                if name == "mkdir" {
+                    if let Value::String(p) = self.evaluate(args[0].clone())? {
+                        let _ = fs::create_dir_all(&p);
+                        return Ok(Value::Null);
+                    }
+                    return Err("mkdir() expects string".to_string());
                 }
                 if name == "len" {
                     let a = self.evaluate(args[0].clone())?;
@@ -498,12 +512,28 @@ impl Interpreter {
                     if let Value::Array(a) = t { return Ok(a.borrow_mut().pop().unwrap_or(Value::Null)); }
                     return Err("pop() expects an array".to_string());
                 }
+                if name == "input" {
+                    let prompt = if args.len() > 0 {
+                        if let Value::String(s) = self.evaluate(args[0].clone())? { s } else { "".to_string() }
+                    } else { "".to_string() };
+                    print!("{}", prompt);
+                    use std::io::Write;
+                    std::io::stdout().flush().unwrap();
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input).unwrap();
+                    return Ok(Value::String(input.trim().to_string()));
+                }
                 if name == "str" { return Ok(Value::String(self.evaluate(args[0].clone())?.to_string())); }
                 if name == "num" {
-                    if let Value::String(s) = self.evaluate(args[0].clone())? {
-                        if let Ok(n) = s.parse::<f64>() { return Ok(Value::Number(n)); }
+                    let val = self.evaluate(args[0].clone())?;
+                    match val {
+                        Value::Number(n) => return Ok(Value::Number(n)),
+                        Value::String(s) => {
+                            if let Ok(n) = s.parse::<f64>() { return Ok(Value::Number(n)); }
+                            return Err(format!("num() cannot parse {:?}", s));
+                        }
+                        _ => return Err("num() expects string or number".to_string()),
                     }
-                    return Err("num() could not parse".to_string());
                 }
                 if name == "type" {
                     let t = match self.evaluate(args[0].clone())? {
@@ -577,6 +607,43 @@ impl Interpreter {
                     if let Value::String(p) = self.evaluate(args[0].clone())? { return Ok(Value::Bool(Path::new(&p).exists())); }
                     return Err("file_exists() expects a string".to_string());
                 }
+                if name == "byte_at" {
+                    let s = self.evaluate(args[0].clone())?; let i = self.evaluate(args[1].clone())?;
+                    if let (Value::String(sv), Value::Number(n)) = (s, i) {
+                        let idx = n as isize; let bytes = sv.as_bytes();
+                        if idx < 0 || idx as usize >= bytes.len() { return Ok(Value::Number(-1.0)); }
+                        return Ok(Value::Number(bytes[idx as usize] as f64));
+                    }
+                    return Err("byte_at() expects (string, number)".to_string());
+                }
+                if name == "byte_substr" {
+                    let s = self.evaluate(args[0].clone())?; let a = self.evaluate(args[1].clone())?; let b = self.evaluate(args[2].clone())?;
+                    if let (Value::String(sv), Value::Number(a_n), Value::Number(b_n)) = (s, a, b) {
+                        let bytes = sv.as_bytes();
+                        let mut start = if a_n < 0.0 { 0 } else { a_n as usize };
+                        let mut end = if b_n < 0.0 { 0 } else { b_n as usize };
+                        if start > bytes.len() { start = bytes.len(); }
+                        if end > bytes.len() { end = bytes.len(); }
+                        if start > end { start = end; }
+                        return Ok(Value::String(String::from_utf8_lossy(&bytes[start..end]).to_string()));
+                    }
+                    return Err("byte_substr() expects (string, number, number)".to_string());
+                }
+                if name == "bytes_to_str" {
+                    let a = self.evaluate(args[0].clone())?;
+                    if let Value::Array(arr) = a {
+                        let borrowed = arr.borrow(); let mut buf = Vec::with_capacity(borrowed.len());
+                        for v in borrowed.iter() {
+                            if let Value::Number(n) = v {
+                                let b = *n as i64;
+                                if !(0..=255).contains(&b) { return Err(format!("bytes_to_str: byte value out of range: {}", b)); }
+                                buf.push(b as u8);
+                            } else { return Err("bytes_to_str() expects array of numbers".to_string()); }
+                        }
+                        return Ok(Value::String(String::from_utf8_lossy(&buf).to_string()));
+                    }
+                    return Err("bytes_to_str() expects an array".to_string());
+                }
 
                 let callee = self.env.get(&name)?;
                 match callee {
@@ -589,7 +656,7 @@ impl Interpreter {
                         let result = self.execute(*body)?;
                         self.env.pop_scope();
                         if let ControlFlow::Return(val) = result { Ok(val) }
-                        else if let ControlFlow::Throw(val) = result { Ok(Value::Null) }
+                        else if let ControlFlow::Throw(_) = result { Ok(Value::Null) }
                         else { Ok(Value::Null) }
                     }
                     _ => Err(format!("'{}' is not a function", name)),
@@ -604,6 +671,27 @@ impl Interpreter {
                 }
             }
             Expr::Binary(left, op, right) => {
+                if op == TokenType::And {
+                    let lv = self.evaluate(*left)?;
+                    if let Value::Bool(l) = lv {
+                        if !l { return Ok(Value::Bool(false)); }
+                        let rv = self.evaluate(*right)?;
+                        if let Value::Bool(r) = rv { return Ok(Value::Bool(r)); }
+                        return Err("Operands must be bools".to_string());
+                    }
+                    return Err("Operands must be bools".to_string());
+                }
+                if op == TokenType::Or {
+                    let lv = self.evaluate(*left)?;
+                    if let Value::Bool(l) = lv {
+                        if l { return Ok(Value::Bool(true)); }
+                        let rv = self.evaluate(*right)?;
+                        if let Value::Bool(r) = rv { return Ok(Value::Bool(r)); }
+                        return Err("Operands must be bools".to_string());
+                    }
+                    return Err("Operands must be bools".to_string());
+                }
+                
                 let lv = self.evaluate(*left)?;
                 let rv = self.evaluate(*right)?;
                 match op {
@@ -670,14 +758,6 @@ impl Interpreter {
                         (Value::Bool(l), Value::Bool(r)) => l != r,
                         _ => true,
                     })),
-                    TokenType::And => match (&lv, &rv) {
-                        (Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(*l && *r)),
-                        _ => Err("Operands must be bools".to_string()),
-                    },
-                    TokenType::Or => match (&lv, &rv) {
-                        (Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(*l || *r)),
-                        _ => Err("Operands must be bools".to_string()),
-                    },
                     _ => Err("Unknown binary operator".to_string()),
                 }
             }

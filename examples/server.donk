@@ -1,0 +1,17 @@
+import "../lib/strings.donk";
+
+print("Starting Donky Web Server...");
+let server = tcp_listen(8080);
+print("Listening on http://127.0.0.1:8080");
+
+while 1 == 1 {
+    let client = tcp_accept(server);
+    
+    let req = tcp_read(client);
+    // Very basic router
+    let body = "<h1>Hello from Donky Native!</h1>";
+    
+    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " + str(len(body)) + "\r\n\r\n" + body;
+    tcp_write(client, response);
+    tcp_close(client);
+}

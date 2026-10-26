@@ -253,6 +253,23 @@ impl Parser {
             }
             TokenType::True => Ok(Expr::Bool(true)),
             TokenType::False => Ok(Expr::Bool(false)),
+            // <--- NEW: anonymous function / lambda in expression position
+            TokenType::Fn => {
+                self.consume(TokenType::LParen, "Expected '(' after 'fn'")?;
+                let mut params = Vec::new();
+                if !self.check(TokenType::RParen) {
+                    loop {
+                        params.push(self.consume(TokenType::Ident, "Expected parameter name")?.lexeme.clone());
+                        if !self.match_token(&[TokenType::Comma]) { break; }
+                    }
+                }
+                self.consume(TokenType::RParen, "Expected ')'")?;
+                self.match_token(&[TokenType::Minus]);
+                self.match_token(&[TokenType::Gt]);
+                if self.check(TokenType::Ident) { self.advance(); }
+                let body = Box::new(self.statement()?);
+                Ok(Expr::Function(params, body))
+            }
             TokenType::Ident => {
                 let name = token.lexeme;
                 if self.match_token(&[TokenType::LParen]) {

@@ -1,0 +1,10 @@
+import "../lib/list.donk";
+
+print("S: sort_by start");
+let nums = [3, 1, 2];
+let sorted = sort_by(nums, fn(x) -> num { return x; });
+print("S done: " + str(sorted));
+
+print("R: reverse start");
+let rev = reverse(nums);
+print("R done: " + str(rev));

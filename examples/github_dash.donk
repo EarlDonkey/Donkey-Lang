@@ -1,0 +1,49 @@
+import "../lib/json.donk";
+import "../lib/strings.donk";
+import "../lib/list.donk";
+
+if len(args) < 1 {
+    print("Usage: donky-native.exe github_dash.donk <username>");
+} else {
+    let username = args[0];
+    print("Fetching data for " + username + "...\n");
+
+    // 1. Fetch User Profile
+    let user_raw = http_get("https://api.github.com/users/" + username);
+    let user = parse_json(user_raw);
+
+    if contains(user, "message") {
+        print("Error: User '" + username + "' not found.");
+    } else {
+        let name = username;
+        if user["name"] != "" { name = user["name"]; }
+        
+        print("=== " + name + " (@" + user["login"] + ") ===");
+        if user["bio"] != "" { print("Bio: " + user["bio"]); }
+        print("Followers: " + str(user["followers"]) + " | Following: " + str(user["following"]));
+        print("Public Repos: " + str(user["public_repos"]));
+        print("");
+
+        // 2. Fetch Repositories
+        let repos_raw = http_get("https://api.github.com/users/" + username + "/repos?per_page=100");
+        let repos = parse_json(repos_raw);
+
+        if len(repos) > 0 {
+            // 3. Sort by stars using the standard library
+            let sorted_repos = sort_by(repos, fn(r) -> num { return r["stargazers_count"]; });
+            let top_repos = reverse(sorted_repos);
+
+            print("Top Repositories by Stars:");
+            let count = 0;
+            for repo in top_repos {
+                if count >= 5 { break; }
+                
+                let lang = "Unknown";
+                if repo["language"] != "" { lang = repo["language"]; }
+                
+                print("  ⭐ " + str(repo["stargazers_count"]) + " - " + repo["name"] + " (" + lang + ")");
+                count = count + 1;
+            }
+        }
+    }
+}

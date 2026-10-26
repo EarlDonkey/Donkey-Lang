@@ -1,0 +1,13 @@
+import "../lib/json.donk";
+import "../lib/strings.donk";
+
+let data = "{\"name\":\"Alice\", \"age\":30, \"scores\":[95, 88, 92], \"active\":true, \"address\":{\"city\":\"New York\", \"zip\":\"10001\"}}";
+
+print("Parsing JSON...");
+let result = parse_json(data);
+
+print("Name: " + result["name"]);
+print("Age: " + str(result["age"]));
+print("Is Active: " + str(result["active"]));
+print("First Score: " + str(result["scores"][0]));
+print("City: " + result["address"]["city"]);

@@ -16,7 +16,7 @@ fn emit(state, line) -> void {
 }
 
 fn new_label(state) -> str {
-    let l = ".L" + str(state["label_count"]);
+    let l = "L" + str(state["label_count"]);
     state["label_count"] = state["label_count"] + 1;
     return l;
 }
@@ -241,6 +241,9 @@ fn compile_to_asm(ast) -> str {
     emit(state, "default rel");
     emit(state, "extern printf");
     emit(state, "extern ExitProcess");
+    emit(state, "extern net_init");     // <--- ADD
+    emit(state, "extern net_connect");  // <--- ADD
+    emit(state, "extern net_close");
     emit(state, "global main");
     emit(state, "");
     emit(state, "section .text");

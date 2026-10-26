@@ -1,0 +1,26 @@
+print("Donky OS Shell v1.1");
+print_newline();
+print_newline();
+
+let buf = alloc(128);
+
+while 1 == 1 {
+    print("donky> ");
+    read_line(buf);
+
+    if str_eq(buf, "help") == 1 {
+        print("Available commands: help, clear, about");
+        print_newline();
+    } else if str_eq(buf, "clear") == 1 {
+        clear_screen();
+        print("Donky OS Shell v1.1");
+        print_newline();
+    } else if str_eq(buf, "about") == 1 {
+        print("Donky OS - The Native Language");
+        print_newline();
+    } else {
+        print("Unknown command: ");
+        print_str(buf);
+        print_newline();
+    }
+}
