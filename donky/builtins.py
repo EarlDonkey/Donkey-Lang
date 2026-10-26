@@ -2,9 +2,7 @@ import socket
 import itertools
 import threading
 import urllib.parse
-import urllib.request
-import hashlib
-import base64
+import json
 
 from donky.errors import DonkyRuntimeError
 from donky.values import (
@@ -168,6 +166,18 @@ def _sort(args: list[object]) -> object:
         raise DonkyRuntimeError(f"sort() failed: {e}")
     return None
 
+def _to_json(args: list[object]) -> object:
+    try:
+        return json.dumps(args[0])
+    except Exception as e:
+        raise DonkyRuntimeError(f"to_json failed: {e}")
+
+def _from_json(args: list[object]) -> object:
+    try:
+        return json.loads(args[0])
+    except Exception as e:
+        raise DonkyRuntimeError(f"from_json failed: {e}")
+
 # ---------- Networking & Web ----------
 
 def _tcp_listen(args: list[object]) -> object:
@@ -228,7 +238,39 @@ def _tcp_close(args: list[object]) -> object:
         except Exception: pass
     return None
 
+def _url_decode(args: list[object]) -> object:
+    s = args[0]
+    if not isinstance(s, str):
+        raise DonkyRuntimeError("url_decode() expects string")
+    return urllib.parse.unquote_plus(s)
+
+def _mime_type(args: list[object]) -> object:
+    path = args[0]
+    if not isinstance(path, str): return "text/plain"
+    if path.endswith(".html"): return "text/html"
+    if path.endswith(".css"): return "text/css"
+    if path.endswith(".js"): return "application/javascript"
+    if path.endswith(".png"): return "image/png"
+    if path.endswith(".jpg") or path.endswith(".jpeg"): return "image/jpeg"
+    if path.endswith(".svg"): return "image/svg+xml"
+    return "text/plain"
+
+def _spawn(args: list[object]) -> object:
+    raise DonkyRuntimeError("spawn() not supported in this execution mode")
+
+def _http_get(args: list[object]) -> object:
+    url = args[0]
+    if not isinstance(url, str):
+        raise DonkyRuntimeError("http_get() expects string URL")
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Donky-Lang/3.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return response.read().decode('utf-8', errors='replace')
+    except Exception as e:
+        raise DonkyRuntimeError(f"http_get failed: {e}")
+
 def _ws_accept(args: list[object]) -> object:
+    import hashlib, base64
     fd = args[0]
     key = args[1]
     if not isinstance(key, str): raise DonkyRuntimeError("ws_accept() expects string key")
@@ -248,7 +290,7 @@ def _ws_read(args: list[object]) -> object:
     if not s: raise DonkyRuntimeError("invalid client socket")
     try:
         header = s.recv(2)
-        if len(header) < 2: return None
+        if len(header) < 2: return ""
         opcode = header[0] & 0x0F
         masked = (header[1] & 0x80) != 0
         length = header[1] & 0x7F
@@ -262,7 +304,7 @@ def _ws_read(args: list[object]) -> object:
         if masked:
             payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
             
-        if opcode == 8: return "" # Close frame
+        if opcode == 8: return ""
         return payload.decode('utf-8', errors='replace')
     except Exception:
         return ""
@@ -284,39 +326,6 @@ def _ws_write(args: list[object]) -> object:
     except Exception as e:
         raise DonkyRuntimeError(f"ws_write failed: {e}")
 
-def _http_get(args: list[object]) -> object:
-    url = args[0]
-    if not isinstance(url, str):
-        raise DonkyRuntimeError("http_get() expects string URL")
-    try:
-        # Standard library HTTP request
-        req = urllib.request.Request(url, headers={'User-Agent': 'Donky-Lang/3.0'})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return response.read().decode('utf-8', errors='replace')
-    except Exception as e:
-        raise DonkyRuntimeError(f"http_get failed: {e}")
-
-def _url_decode(args: list[object]) -> object:
-    s = args[0]
-    if not isinstance(s, str):
-        raise DonkyRuntimeError("url_decode() expects string")
-    return urllib.parse.unquote_plus(s)
-
-def _mime_type(args: list[object]) -> object:
-    path = args[0]
-    if not isinstance(path, str): return "text/plain"
-    if path.endswith(".html"): return "text/html"
-    if path.endswith(".css"): return "text/css"
-    if path.endswith(".js"): return "application/javascript"
-    if path.endswith(".png"): return "image/png"
-    if path.endswith(".jpg") or path.endswith(".jpeg"): return "image/jpeg"
-    if path.endswith(".svg"): return "image/svg+xml"
-    return "text/plain"
-
-def _spawn(args: list[object]) -> object:
-    # This is intercepted by the Interpreter and VM.
-    raise DonkyRuntimeError("spawn() not supported in this execution mode")
-
 BUILTINS = [
     ("len",        1, _len,          1),
     ("str",        1, _str,          1),
@@ -337,6 +346,8 @@ BUILTINS = [
     ("replace",    3, _replace,      3),
     ("input",      0, _input,        1),
     ("sort",       1, _sort,         1),
+    ("to_json",    1, _to_json,      1),
+    ("from_json",  1, _from_json,    1),
     ("tcp_listen", 1, _tcp_listen,   1),
     ("tcp_accept", 1, _tcp_accept,   1),
     ("tcp_read",   1, _tcp_read,     2),

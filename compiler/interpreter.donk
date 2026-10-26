@@ -35,6 +35,10 @@ fn env_define(env, name, value) -> void {
     vars[name] = value;
 }
 
+fn is_return(node) -> bool {
+    return type(node) == "map" && contains(node, "type") && node["type"] == "Return";
+}
+
 // --- Expressions ---
 
 fn eval_expr(node, env) -> any {
@@ -106,19 +110,12 @@ fn eval_expr(node, env) -> any {
             i = i + 1;
         }
         
-        try {
-            for s in callee_fn["body"] {
-                exec_stmt(s, call_env);
+        let result = "";
+        for s in callee_fn["body"] {
+            result = exec_stmt(s, call_env);
+            if is_return(result) {
+                return result["value"];
             }
-        } catch e {
-            if starts_with(e, "RETURN:") {
-                let val_str = slice(e, 7, len(e));
-                // If it's a number, return the number. Otherwise, return the string.
-                let n = num(val_str);
-                if str(n) == val_str { return n; }
-                return val_str;
-            }
-            throw e;
         }
         return "";
     }
@@ -128,62 +125,70 @@ fn eval_expr(node, env) -> any {
 
 // --- Statements ---
 
-fn exec_stmt(node, env) -> void {
+fn exec_stmt(node, env) -> any {
     let t = node["type"];
     
     if t == "Program" {
         for s in node["stmts"] {
-            exec_stmt(s, env);
+            let res = exec_stmt(s, env);
+            if is_return(res) { return res; }
         }
-        return;
+        return "";
     }
     
     if t == "LetStmt" {
         let val = eval_expr(node["value"], env);
         env_define(env, node["name"], val);
-        return;
+        return "";
     }
     
     if t == "AssignStmt" {
         let val = eval_expr(node["value"], env);
         env_set(env, node["name"], val);
-        return;
+        return "";
     }
     
     if t == "PrintStmt" {
         let val = eval_expr(node["value"], env);
         print(val);
-        return;
+        return "";
     }
     
     if t == "ExprStmt" {
         eval_expr(node["expr"], env);
-        return;
+        return "";
+    }
+    
+    if t == "ReturnStmt" {
+        let val = eval_expr(node["value"], env);
+        return { "type": "Return", "value": val };
     }
     
     if t == "Block" {
         let block_env = new_env(env);
         for s in node["stmts"] {
-            exec_stmt(s, block_env);
+            let res = exec_stmt(s, block_env);
+            if is_return(res) { return res; }
         }
-        return;
+        return "";
     }
     
     if t == "IfStmt" {
         let cond = eval_expr(node["cond"], env);
         if cond {
-            exec_stmt(node["then"], env);
+            return exec_stmt(node["then"], env);
         } else if node["else"] != "" {
-            exec_stmt(node["else"], env);
+            return exec_stmt(node["else"], env);
         }
-        return;
+        return "";
     }
     
     if t == "WhileStmt" {
         while eval_expr(node["cond"], env) {
-            exec_stmt(node["body"], env);
+            let res = exec_stmt(node["body"], env);
+            if is_return(res) { return res; }
         }
-        return;
+        return "";
     }
     
     throw "Cannot execute statement: " + t;

@@ -47,6 +47,8 @@ BUILTIN_RETURNS = {
     "ws_accept": TYPE_ANY,
     "ws_read":   TYPE_STRING,
     "ws_write":  TYPE_ANY,
+    "to_json": TYPE_STRING,
+    "from_json": TYPE_ANY,
 }
 
 
