@@ -6,12 +6,8 @@
 //
 // Expects Apache/Nginx "common log format":
 //   IP - - [timestamp] "METHOD /path HTTP/x.x" STATUS SIZE
-//
-// Limitation: count-sorting uses a padded-string trick because Donky
-// doesn't have sort_by yet. See comment near ranking below.
 
 import "../lib/list.donk";
-import "../lib/strings.donk";
 import "../lib/format.donk";
 
 fn analyze(path, field, limit) -> void {
@@ -58,27 +54,20 @@ fn analyze(path, field, limit) -> void {
         total = total + 1;
     }
 
-    // Rank by count descending. We build "0000000004|key" strings —
-    // zero-padding the count to fixed width means lexicographic sort
-    // equals numeric sort. This is the standard workaround until
-    // sort_by(arr, key_fn) exists. TODO: add sort_by to the language.
+    // Build [key, count] pairs, sort ascending by count, reverse for desc.
     let entries = [];
     for k in counts {
-        push(entries, pad_left(str(counts[k]), 10, "0") + "|" + k);
+        push(entries, [k, counts[k]]);
     }
-    sort(entries);
-    let ranked = reverse(entries);
+    let ranked = reverse(sort_by(entries, fn(pair) -> num { return pair[1]; }));
 
     print("=== " + field + " — total " + str(total)
           + " entries, " + str(len(counts)) + " unique"
           + " — top " + str(limit) + " ===");
     let shown = 0;
-    for e in ranked {
+    for pair in ranked {
         if shown >= limit { break; }
-        let sep = index_of(e, "|");
-        let c = num(slice(e, 0, sep));
-        let key = slice(e, sep + 1, len(e));
-        print(pad_left(str(c), 6, " ") + "  " + key);
+        print(pad_left(str(pair[1]), 6, " ") + "  " + pair[0]);
         shown = shown + 1;
     }
     if skipped > 0 {

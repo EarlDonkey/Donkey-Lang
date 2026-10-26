@@ -130,3 +130,69 @@ def test_chained_map_filter():
         'print(result);'
     )
     assert run(src) == "[9, 16]\n"
+    
+def test_sort_by_numbers():
+    src = (
+        'import "lib/list.donk";'
+        'let a = [3, 1, 2];'
+        'print(sort_by(a, fn(x) -> num { return x; }));'
+    )
+    assert run(src) == "[1, 2, 3]\n"
+
+
+def test_sort_by_empty():
+    src = 'import "lib/list.donk"; print(sort_by([], fn(x) -> num { return x; }));'
+    assert run(src) == "[]\n"
+
+
+def test_sort_by_single():
+    src = 'import "lib/list.donk"; print(sort_by([5], fn(x) -> num { return x; }));'
+    assert run(src) == "[5]\n"
+
+
+def test_sort_by_strings():
+    src = (
+        'import "lib/list.donk";'
+        'print(sort_by(["c", "a", "b"], fn(s) -> str { return s; }));'
+    )
+    assert run(src) == "[a, b, c]\n"
+
+
+def test_sort_by_derived_key():
+    src = (
+        'import "lib/list.donk";'
+        'let words = ["banana", "kiwi", "apple"];'
+        'let by_len = sort_by(words, fn(w) -> num { return len(w); });'
+        'print(by_len);'
+    )
+    assert run(src) == "[kiwi, apple, banana]\n"
+
+
+def test_sort_by_non_mutating():
+    src = (
+        'import "lib/list.donk";'
+        'let a = [3, 1, 2];'
+        'let b = sort_by(a, fn(x) -> num { return x; });'
+        'print(a); print(b);'
+    )
+    assert run(src) == "[3, 1, 2]\n[1, 2, 3]\n"
+
+
+def test_sort_by_stable():
+    src = (
+        'import "lib/list.donk";'
+        'let pairs = [[1, "a"], [2, "b"], [1, "c"], [2, "d"]];'
+        'let sorted = sort_by(pairs, fn(p) -> num { return p[0]; });'
+        'print(sorted);'
+    )
+    assert run(src) == "[[1, a], [1, c], [2, b], [2, d]]\n"
+
+
+def test_sort_by_reverse_for_desc():
+    src = (
+        'import "lib/list.donk";'
+        'let a = [1, 3, 2];'
+        'let desc = reverse(sort_by(a, fn(x) -> num { return x; }));'
+        'print(desc);'
+    )
+    assert run(src) == "[3, 2, 1]\n"

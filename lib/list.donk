@@ -77,3 +77,38 @@ fn count(arr, f) -> num {
     }
     return n;
 }
+
+// Return a new array, sorted ascending by the result of f.
+// f must return a number or a string (both are comparable).
+// Stable: equal keys preserve their original relative order.
+// Non-mutating: arr is unchanged.
+// Call reverse(sort_by(...)) for descending order.
+//
+// Implementation is bubble sort — O(n^2). Fine for hundreds of items.
+// Promotion to a builtin (with faster sorting) is a future compiler
+// change; see ROADMAP.
+fn sort_by(arr, f) -> array {
+    let keyed = [];
+    for x in arr {
+        push(keyed, [f(x), x]);
+    }
+    let n = len(keyed);
+    let i = 0;
+    while i < n {
+        let j = 0;
+        while j < n - 1 - i {
+            if keyed[j][0] > keyed[j + 1][0] {
+                let t = keyed[j];
+                keyed[j] = keyed[j + 1];
+                keyed[j + 1] = t;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    let out = [];
+    for pair in keyed {
+        push(out, pair[1]);
+    }
+    return out;
+}

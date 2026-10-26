@@ -28,7 +28,8 @@ with Python, Go, or Rust, and it never will.
 - [ ] String interpolation `"Hello, ${name}!"`
 - [ ] Compound assignment `+=`, `-=`, `*=`, `/=`
 - [ ] Range syntax `1..10` for `for` loops
-- [ ] `sort_by(arr, fn)` with user-function callbacks
+- [x] `sort_by(arr, f)` — shipped in `lib/list.donk`. Promote to a builtin
+      (faster sort algorithm) only if real use hits the O(n^2) wall.
 - [ ] Better error messages with "did you mean...?" suggestions
 
 ### v1.3 — Tooling

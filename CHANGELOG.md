@@ -33,6 +33,7 @@ PyInstaller packaging.
 - Disassembler
 - CLI: `run`, `--bytecode`, `--no-types`, `--check-only`
 - PyInstaller packaging (`donky.exe`, onedir)
+- `lib/list.donk` — `sort_by(arr, f)` (pure Donky, stable, non-mutating)
 
 ### Builtins
 - `len`, `str`, `num`, `type`
