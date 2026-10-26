@@ -1,0 +1,100 @@
+// logtop.donk — count log entries by a field, print top N.
+//
+// Usage: donky examples/logtop.donk FILE [field] [n]
+//   field: ip | status | path | method   (default: ip)
+//   n:     number of top results         (default: 10)
+//
+// Expects Apache/Nginx "common log format":
+//   IP - - [timestamp] "METHOD /path HTTP/x.x" STATUS SIZE
+//
+// Limitation: count-sorting uses a padded-string trick because Donky
+// doesn't have sort_by yet. See comment near ranking below.
+
+import "../lib/list.donk";
+import "../lib/strings.donk";
+import "../lib/format.donk";
+
+fn analyze(path, field, limit) -> void {
+    if !file_exists(path) {
+        throw "file not found: " + path;
+    }
+
+    let text = read_file(path);
+    let lines = split(text, "\n");
+    let counts = {};
+    let total = 0;
+    let skipped = 0;
+
+    for line in lines {
+        let t = trim(line);
+        if len(t) == 0 { continue; }
+
+        let parts = split(t, " ");
+        if len(parts) < 9 {
+            skipped = skipped + 1;
+            continue;
+        }
+
+        let value = "";
+        if field == "ip" {
+            value = parts[0];
+        } else if field == "method" {
+            value = replace(parts[5], "\"", "");
+        } else if field == "path" {
+            value = parts[6];
+        } else if field == "status" {
+            value = parts[8];
+        } else {
+            throw "unknown field: " + field;
+        }
+
+        if len(value) == 0 { continue; }
+
+        if contains(counts, value) {
+            counts[value] = counts[value] + 1;
+        } else {
+            counts[value] = 1;
+        }
+        total = total + 1;
+    }
+
+    // Rank by count descending. We build "0000000004|key" strings —
+    // zero-padding the count to fixed width means lexicographic sort
+    // equals numeric sort. This is the standard workaround until
+    // sort_by(arr, key_fn) exists. TODO: add sort_by to the language.
+    let entries = [];
+    for k in counts {
+        push(entries, pad_left(str(counts[k]), 10, "0") + "|" + k);
+    }
+    sort(entries);
+    let ranked = reverse(entries);
+
+    print("=== " + field + " — total " + str(total)
+          + " entries, " + str(len(counts)) + " unique"
+          + " — top " + str(limit) + " ===");
+    let shown = 0;
+    for e in ranked {
+        if shown >= limit { break; }
+        let sep = index_of(e, "|");
+        let c = num(slice(e, 0, sep));
+        let key = slice(e, sep + 1, len(e));
+        print(pad_left(str(c), 6, " ") + "  " + key);
+        shown = shown + 1;
+    }
+    if skipped > 0 {
+        print("(" + str(skipped) + " malformed line(s) skipped)");
+    }
+}
+
+if len(args) < 1 {
+    print("usage: logtop.donk FILE [field] [n]");
+    print("  field: ip | status | path | method   (default: ip)");
+    print("  n:     number of top results         (default: 10)");
+} else {
+    let path = args[0];
+    let field = "ip";
+    let limit = 10;
+    if len(args) >= 2 { field = args[1]; }
+    if len(args) >= 3 { limit = num(args[2]); }
+    analyze(path, field, limit);
+}
