@@ -2,12 +2,25 @@
   "name": "donky",
   "displayName": "Donky",
   "description": "Syntax highlighting and language support for Donky",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "Earl Donkey",
-  "engines": {
-    "vscode": "^1.75.0"
-  },
+  "engines": { "vscode": "^1.75.0" },
   "categories": ["Programming Languages"],
+  "main": "./out/extension.js",
+  "activationEvents": ["onLanguage:donky"],
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.4.0"
+  },
   "contributes": {
     "languages": [
       {
@@ -23,7 +36,17 @@
         "scopeName": "source.donky",
         "path": "./syntaxes/donky.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Donky",
+      "properties": {
+        "donky.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python interpreter that has pygls installed. Leave empty to auto-detect .venv walking up from the workspace, then from the extension folder, then fall back to 'python'."
+        }
+      }
+    }
   },
   "license": "MIT"
 }
