@@ -1,5 +1,7 @@
+import os
 import sys
 
+from donky import modules
 from donky.errors import DonkyRuntimeError
 from donky.interpreter import Interpreter
 from donky.lexer import LexError, Lexer, TokenType
@@ -14,7 +16,6 @@ BANNER = "Donky REPL (type :help for commands, Ctrl+D or :quit to exit)"
 
 
 def _brace_delta(line: str) -> int:
-    """Net count of '{' minus '}' outside strings and // comments."""
     delta = 0
     in_string = False
     i = 0
@@ -41,7 +42,6 @@ def _brace_delta(line: str) -> int:
 
 
 def _read_chunk() -> str | None:
-    """Read a complete chunk (one or more lines until braces balance)."""
     try:
         first = input(PROMPT)
     except EOFError:
@@ -60,7 +60,6 @@ def _read_chunk() -> str | None:
 
 
 def _try_expression(src: str, interp: Interpreter) -> bool:
-    """Parse src as a single expression + EOF; if so, eval and print."""
     try:
         parser = Parser(Lexer(src).tokenize())
         expr = parser.parse_expr()
@@ -72,24 +71,18 @@ def _try_expression(src: str, interp: Interpreter) -> bool:
         return False
 
 
-def _run_program(src: str, interp: Interpreter) -> bool:
-    """Parse and run src as a Program. Return True on success."""
-    try:
-        prog = Parser(Lexer(src).tokenize()).parse()
-        interp.run(prog)
-        return True
-    except (LexError, ParseError, DonkyRuntimeError):
-        return False
-
-
-def _report(src: str, interp: Interpreter) -> None:
-    """Try expression → program → program+';', then report the real error."""
+def _report(src: str, interp: Interpreter, base_dir: str,
+            seen: set[str]) -> None:
     if _try_expression(src, interp):
         return
 
+    # Attempt 1: parse as-is, expand modules, run
     try:
         prog = Parser(Lexer(src).tokenize()).parse()
+        seen_copy = set(seen)
+        prog = modules.expand(prog, base_dir, seen_copy)
         interp.run(prog)
+        seen.update(seen_copy)
         return
     except (LexError, ParseError):
         pass
@@ -97,10 +90,13 @@ def _report(src: str, interp: Interpreter) -> None:
         print(f"donky: {e}", file=sys.stderr)
         return
 
-    # Retry with ';' appended (statements without trailing semicolon)
+    # Attempt 2: retry with ';' appended (statements without trailing semicolon)
     try:
         prog = Parser(Lexer(src + ";").tokenize()).parse()
+        seen_copy = set(seen)
+        prog = modules.expand(prog, base_dir, seen_copy)
         interp.run(prog)
+        seen.update(seen_copy)
         return
     except (LexError, ParseError):
         pass
@@ -108,7 +104,7 @@ def _report(src: str, interp: Interpreter) -> None:
         print(f"donky: {e}", file=sys.stderr)
         return
 
-    # All attempts failed — show the first real error for diagnosis
+    # All attempts failed — show the first real error
     try:
         Parser(Lexer(src).tokenize()).parse()
     except LexError as e:
@@ -119,6 +115,8 @@ def _report(src: str, interp: Interpreter) -> None:
 
 def repl() -> None:
     interp = Interpreter()
+    base_dir = os.getcwd()
+    seen: set[str] = set()
     print(BANNER)
 
     while True:
@@ -143,9 +141,10 @@ def repl() -> None:
             print("  <expression>   evaluate and print (e.g. 1 + 2)")
             print("  <statement>;   run a statement (e.g. let x = 1;)")
             print("  { ... }        multi-line blocks are supported")
+            print("  import \"...\"   load a module (relative to cwd)")
             continue
 
-        _report(src, interp)
+        _report(src, interp, base_dir, seen)
 
 
 def main() -> None:
