@@ -31,21 +31,20 @@ class CompileContext:
     slot_counter: int
 
 
+@dataclass
+class LoopContext:
+    start_offset: int
+    break_patches: list[int]
+
+
 class Compiler:
-    """Compiles a Donky Program into a CodeObject with closures.
-
-    Upvalue resolution: when a function references a name that isn't
-    local, it walks the enclosing-function chain. The variable becomes
-    an upvalue of the current function, captured from either an
-    enclosing local or an enclosing upvalue. Globals are the fallback.
-    """
-
     def __init__(self) -> None:
         self.code = CodeObject(name="<main>", arity=0)
         self.scopes: list[dict[str, int]] = []
         self.slot_counter = 0
         self.position: tuple[int, int] = (0, 0)
         self.enclosing: list[CompileContext] = []
+        self.loop_stack: list[LoopContext] = []
 
     def compile(self, program: ast.Program) -> CodeObject:
         for stmt in program.stmts:
@@ -89,8 +88,6 @@ class Compiler:
 
     def _resolve_upvalue_at(self, name: str, code: CodeObject,
                             enclosing: list[CompileContext]) -> int | None:
-        """Resolve `name` as an upvalue of `code`. `enclosing` is the chain
-        of ancestor contexts, outermost first."""
         if not enclosing:
             return None
         parent = enclosing[-1]
@@ -203,6 +200,15 @@ class Compiler:
                 else:
                     self._emit(Op.CONST, self.code.constant_index(None))
                 self._emit(Op.RETURN)
+            case ast.BreakStmt(line, col):
+                if not self.loop_stack:
+                    raise CompileError("'break' outside of a loop", line, col)
+                idx = self._emit_jump(Op.JUMP)
+                self.loop_stack[-1].break_patches.append(idx)
+            case ast.ContinueStmt(line, col):
+                if not self.loop_stack:
+                    raise CompileError("'continue' outside of a loop", line, col)
+                self._emit(Op.JUMP, self.loop_stack[-1].start_offset)
             case ast.Block(stmts, line, col):
                 self._compile_block_scoped(stmt)
             case ast.IndexSet(name, index, value, line, col):
@@ -235,9 +241,18 @@ class Compiler:
         self.compile_expr(cond)
         self.position = saved
         jf_idx = self._emit_jump(Op.JUMP_IF_FALSE)
-        self._compile_block_scoped(body)
+
+        ctx = LoopContext(start_offset=loop_start, break_patches=[])
+        self.loop_stack.append(ctx)
+        try:
+            self._compile_block_scoped(body)
+        finally:
+            self.loop_stack.pop()
+
         self._emit(Op.JUMP, loop_start)
         self._patch_jump(jf_idx)
+        for bp in ctx.break_patches:
+            self._patch_jump(bp)
 
     def _compile_block_scoped(self, block: ast.Block) -> None:
         self._push_scope()
@@ -254,6 +269,7 @@ class Compiler:
         saved_scopes = self.scopes
         saved_slots = self.slot_counter
         saved_position = self.position
+        saved_loop_stack = self.loop_stack
 
         self.enclosing.append(
             CompileContext(saved_code, saved_scopes, saved_slots)
@@ -262,6 +278,7 @@ class Compiler:
         self.code = fn_code
         self.scopes = []
         self.slot_counter = 0
+        self.loop_stack = []
 
         try:
             self._push_scope()
@@ -285,6 +302,7 @@ class Compiler:
             self.scopes = saved_scopes
             self.slot_counter = saved_slots
             self.position = saved_position
+            self.loop_stack = saved_loop_stack
 
         return fn_code
 

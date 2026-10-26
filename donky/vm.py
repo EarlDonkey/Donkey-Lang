@@ -288,11 +288,15 @@ class VM:
         callee = self.stack.pop()
 
         if isinstance(callee, Builtin):
-            if len(args) != callee.arity:
-                raise self._err(
-                    f"{callee.name}() expects {callee.arity} "
-                    f"argument(s), got {len(args)}"
-                )
+            max_a = callee.max_arity if callee.max_arity is not None else callee.arity
+            if not (callee.arity <= len(args) <= max_a):
+                if callee.arity == max_a:
+                    msg = (f"{callee.name}() expects {callee.arity} "
+                           f"argument(s), got {len(args)}")
+                else:
+                    msg = (f"{callee.name}() expects {callee.arity} or "
+                           f"{max_a} argument(s), got {len(args)}")
+                raise self._err(msg)
             try:
                 result = callee.impl(args)
             except DonkyRuntimeError as e:

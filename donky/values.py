@@ -47,6 +47,7 @@ class Builtin:
     name: str
     arity: int
     impl: Callable[[list[object]], object]
+    max_arity: int | None = None
 
 
 class Cell:

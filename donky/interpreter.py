@@ -12,6 +12,14 @@ class ReturnSignal(Exception):
         self.value = value
 
 
+class BreakSignal(Exception):
+    pass
+
+
+class ContinueSignal(Exception):
+    pass
+
+
 class Interpreter:
     def __init__(self, args: list[str] | None = None) -> None:
         self.globals = Environment()
@@ -26,6 +34,10 @@ class Interpreter:
                 self.exec_stmt(stmt)
             except ReturnSignal:
                 raise self._err(stmt, "'return' outside of a function")
+            except (BreakSignal, ContinueSignal):
+                raise self._err(
+                    stmt, "'break'/'continue' outside of a loop"
+                )
 
     # ---------- statements ----------
 
@@ -44,12 +56,21 @@ class Interpreter:
                     self.exec_block(else_)
             case ast.WhileStmt(cond, body, line, col):
                 while self._require_bool(self.eval_expr(cond), stmt):
-                    self.exec_block(body)
+                    try:
+                        self.exec_block(body)
+                    except BreakSignal:
+                        break
+                    except ContinueSignal:
+                        pass
             case ast.FnStmt(name, params, ret, body, line, col):
                 self.env.define(name, Function(name, params, body, self.env, ret))
             case ast.ReturnStmt(value, line, col):
                 v = None if value is None else self.eval_expr(value)
                 raise ReturnSignal(v)
+            case ast.BreakStmt(line, col):
+                raise BreakSignal()
+            case ast.ContinueStmt(line, col):
+                raise ContinueSignal()
             case ast.Block(stmts, line, col):
                 self.exec_block(stmt)
             case ast.IndexSet(name, index_expr, value_expr, line, col):
@@ -268,11 +289,14 @@ class Interpreter:
 
     def _call_builtin(self, fn: Builtin, args: list[object],
                       node: ast.Expr) -> object:
-        if len(args) != fn.arity:
-            raise self._err(
-                node,
-                f"{fn.name}() expects {fn.arity} argument(s), got {len(args)}",
-            )
+        max_a = fn.max_arity if fn.max_arity is not None else fn.arity
+        if not (fn.arity <= len(args) <= max_a):
+            if fn.arity == max_a:
+                msg = f"{fn.name}() expects {fn.arity} argument(s), got {len(args)}"
+            else:
+                msg = (f"{fn.name}() expects {fn.arity} or {max_a} "
+                       f"argument(s), got {len(args)}")
+            raise self._err(node, msg)
         try:
             return fn.impl(args)
         except DonkyRuntimeError as e:

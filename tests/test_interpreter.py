@@ -484,3 +484,152 @@ def test_closure_multi_level(capsys):
         "print(outer());"
     )
     assert capsys.readouterr().out == "11\n"
+
+# ---------- Session 9: input / sort / break / continue ----------
+
+def test_input_returns_string(monkeypatch, capsys):
+    monkeypatch.setattr('builtins.input', lambda prompt='': "hello")
+    run_src('let x = input(""); print(x);')
+    assert capsys.readouterr().out == "hello\n"
+
+
+def test_input_no_prompt(monkeypatch, capsys):
+    monkeypatch.setattr('builtins.input', lambda prompt='': "world")
+    run_src('print(input());')
+    assert capsys.readouterr().out == "world\n"
+
+
+def test_input_eof(monkeypatch):
+    def raise_eof(prompt=''):
+        raise EOFError()
+    monkeypatch.setattr('builtins.input', raise_eof)
+    with pytest.raises(DonkyRuntimeError):
+        run_src('print(input(""));')
+
+
+def test_input_type(monkeypatch, capsys):
+    monkeypatch.setattr('builtins.input', lambda prompt='': "42")
+    run_src('print(type(input()));')
+    assert capsys.readouterr().out == "string\n"
+
+
+def test_sort_numbers(capsys):
+    run_src("let a = [3, 1, 2]; sort(a); print(a);")
+    assert capsys.readouterr().out == "[1, 2, 3]\n"
+
+
+def test_sort_strings(capsys):
+    run_src('let a = ["charlie", "alice", "bob"]; sort(a); print(a);')
+    assert capsys.readouterr().out == "[alice, bob, charlie]\n"
+
+
+def test_sort_mixed_ints_floats(capsys):
+    run_src("let a = [3.5, 1, 2.0]; sort(a); print(a);")
+    assert capsys.readouterr().out == "[1, 2.0, 3.5]\n"
+
+
+def test_sort_empty(capsys):
+    run_src("let a = []; sort(a); print(a);")
+    assert capsys.readouterr().out == "[]\n"
+
+
+def test_sort_single(capsys):
+    run_src("let a = [5]; sort(a); print(a);")
+    assert capsys.readouterr().out == "[5]\n"
+
+
+def test_sort_mixed_types_errors():
+    with pytest.raises(DonkyRuntimeError):
+        run_src('let a = [1, "a"]; sort(a);')
+
+
+def test_sort_bool_number_errors():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("let a = [1, true]; sort(a);")
+
+
+def test_sort_non_array():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("sort(5);")
+
+
+def test_break_basic(capsys):
+    run_src(
+        "let i = 0;"
+        "while true {"
+        "  if i == 3 { break; }"
+        "  print(i);"
+        "  i = i + 1;"
+        "}"
+    )
+    assert capsys.readouterr().out == "0\n1\n2\n"
+
+
+def test_continue_basic(capsys):
+    run_src(
+        "let i = 0;"
+        "while i < 5 {"
+        "  i = i + 1;"
+        "  if i == 3 { continue; }"
+        "  print(i);"
+        "}"
+    )
+    assert capsys.readouterr().out == "1\n2\n4\n5\n"
+
+
+def test_break_nested_if(capsys):
+    run_src(
+        "let i = 0;"
+        "while i < 10 {"
+        "  if i == 5 {"
+        "    if true {"
+        "      break;"
+        "    }"
+        "  }"
+        "  i = i + 1;"
+        "}"
+        "print(i);"
+    )
+    assert capsys.readouterr().out == "5\n"
+
+
+def test_continue_skips_rest(capsys):
+    run_src(
+        "let i = 0;"
+        "while i < 3 {"
+        "  i = i + 1;"
+        "  continue;"
+        "  print(\"never\");"
+        "}"
+        "print(i);"
+    )
+    assert capsys.readouterr().out == "3\n"
+
+
+def test_break_inside_function_errors():
+    with pytest.raises(Exception):
+        run_src("fn f() -> void { break; }")
+
+
+def test_continue_inside_function_errors():
+    with pytest.raises(Exception):
+        run_src("fn f() -> void { continue; }")
+
+
+def test_break_at_top_errors():
+    with pytest.raises(Exception):
+        run_src("break;")
+
+
+def test_break_finds_early(capsys):
+    run_src(
+        "let nums = [4, 7, 10, 15, 22];"
+        "let i = 0;"
+        "let found = -1;"
+        "while i < len(nums) {"
+        "  if nums[i] > 10 { found = nums[i]; break; }"
+        "  i = i + 1;"
+        "}"
+        "print(found);"
+    )
+    assert capsys.readouterr().out == "15\n"

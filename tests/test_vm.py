@@ -535,3 +535,62 @@ def test_diff_err_string_index_oob():
 
 def test_diff_err_string_index_set():
     assert_same_error('let s = "abc"; s[0] = "x";')
+
+# ---------- Session 9: input / sort / break / continue ----------
+
+def test_diff_sort_numbers():
+    assert assert_same("let a = [3, 1, 2]; sort(a); print(a);") == "[1, 2, 3]\n"
+
+
+def test_diff_sort_strings():
+    assert_same('let a = ["c", "a", "b"]; sort(a); print(a);')
+
+
+def test_diff_break():
+    src = (
+        "let i = 0;"
+        "while true {"
+        "  if i == 3 { break; }"
+        "  print(i);"
+        "  i = i + 1;"
+        "}"
+    )
+    assert assert_same(src) == "0\n1\n2\n"
+
+
+def test_diff_continue():
+    src = (
+        "let i = 0;"
+        "while i < 5 {"
+        "  i = i + 1;"
+        "  if i == 3 { continue; }"
+        "  print(i);"
+        "}"
+    )
+    assert assert_same(src) == "1\n2\n4\n5\n"
+
+
+def test_diff_break_in_nested_if():
+    src = (
+        "let i = 0;"
+        "while i < 10 {"
+        "  if i == 5 { if true { break; } }"
+        "  i = i + 1;"
+        "}"
+        "print(i);"
+    )
+    assert assert_same(src) == "5\n"
+
+
+def test_diff_input(monkeypatch):
+    monkeypatch.setattr('builtins.input', lambda prompt='': "hello")
+    assert assert_same('print(input(""));') == "hello\n"
+
+
+def test_diff_input_number(monkeypatch, capsys):
+    monkeypatch.setattr('builtins.input', lambda prompt='': "42")
+    src = 'let n = num(input("")); print(n + 8);'
+    a = _run_interp(src)
+    capsys.readouterr()  # clear
+    b = _run_vm(src)
+    assert a == b == "50\n"

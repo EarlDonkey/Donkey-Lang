@@ -124,6 +124,16 @@ class ReturnStmt:
     col: int = 0
 
 @dataclass
+class BreakStmt:
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class ContinueStmt:
+    line: int = 0
+    col: int = 0
+
+@dataclass
 class Block:
     stmts: list[Stmt]
     line: int = 0
@@ -149,4 +159,4 @@ class Program:
 Expr = (NumberLit | StringLit | BoolLit | Ident | Binary | Unary
         | Assign | Call | ArrayLit | Index)
 Stmt = (LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | FnStmt
-        | ReturnStmt | Block | IndexSet)
+        | ReturnStmt | Block | IndexSet | BreakStmt | ContinueStmt)

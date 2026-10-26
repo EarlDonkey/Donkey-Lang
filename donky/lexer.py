@@ -17,7 +17,9 @@ class TokenType(Enum):
     PRINT = auto()
     TRUE = auto()
     FALSE = auto()
-    DIV = auto()       # integer division keyword
+    DIV = auto()
+    BREAK = auto()
+    CONTINUE = auto()
     # operators
     PLUS = auto()
     MINUS = auto()
@@ -67,16 +69,18 @@ class LexError(Exception):
 
 
 KEYWORDS = {
-    "let":    TokenType.LET,
-    "fn":     TokenType.FN,
-    "if":     TokenType.IF,
-    "else":   TokenType.ELSE,
-    "while":  TokenType.WHILE,
-    "return": TokenType.RETURN,
-    "print":  TokenType.PRINT,
-    "true":   TokenType.TRUE,
-    "false":  TokenType.FALSE,
-    "div":    TokenType.DIV,
+    "let":      TokenType.LET,
+    "fn":       TokenType.FN,
+    "if":       TokenType.IF,
+    "else":     TokenType.ELSE,
+    "while":    TokenType.WHILE,
+    "return":   TokenType.RETURN,
+    "print":    TokenType.PRINT,
+    "true":     TokenType.TRUE,
+    "false":    TokenType.FALSE,
+    "div":      TokenType.DIV,
+    "break":    TokenType.BREAK,
+    "continue": TokenType.CONTINUE,
 }
 
 

@@ -22,6 +22,7 @@ class Parser:
     def __init__(self, tokens: list[Token]):
         self.tokens = tokens
         self.pos = 0
+        self.loop_depth = 0
 
     # ---------- cursor ----------
 
@@ -111,7 +112,6 @@ class Parser:
                     f"expected expression, got {tok.type.name}", tok
                 )
 
-        # postfix: index reads, chained (a[0][1])
         while self._check(TokenType.LBRACKET):
             self._advance()
             idx = self.parse_expr(0)
@@ -130,13 +130,15 @@ class Parser:
         return ast.Program(stmts, line, col)
 
     def parse_statement(self) -> ast.Stmt:
-        if self._check(TokenType.LET):    return self.parse_let()
-        if self._check(TokenType.PRINT):  return self.parse_print()
-        if self._check(TokenType.IF):     return self.parse_if()
-        if self._check(TokenType.WHILE):  return self.parse_while()
-        if self._check(TokenType.FN):     return self.parse_fn()
-        if self._check(TokenType.RETURN): return self.parse_return()
-        if self._check(TokenType.LBRACE): return self.parse_block()
+        if self._check(TokenType.LET):      return self.parse_let()
+        if self._check(TokenType.PRINT):    return self.parse_print()
+        if self._check(TokenType.IF):       return self.parse_if()
+        if self._check(TokenType.WHILE):    return self.parse_while()
+        if self._check(TokenType.FN):       return self.parse_fn()
+        if self._check(TokenType.RETURN):   return self.parse_return()
+        if self._check(TokenType.BREAK):    return self.parse_break()
+        if self._check(TokenType.CONTINUE): return self.parse_continue()
+        if self._check(TokenType.LBRACE):   return self.parse_block()
         return self.parse_expr_stmt()
 
     def parse_block(self) -> ast.Block:
@@ -171,6 +173,20 @@ class Parser:
         self._expect(TokenType.SEMI, "';' after return")
         return ast.ReturnStmt(value, tok.line, tok.col)
 
+    def parse_break(self) -> ast.BreakStmt:
+        tok = self._advance()
+        if self.loop_depth == 0:
+            raise ParseError("'break' outside of a loop", tok)
+        self._expect(TokenType.SEMI, "';' after break")
+        return ast.BreakStmt(tok.line, tok.col)
+
+    def parse_continue(self) -> ast.ContinueStmt:
+        tok = self._advance()
+        if self.loop_depth == 0:
+            raise ParseError("'continue' outside of a loop", tok)
+        self._expect(TokenType.SEMI, "';' after continue")
+        return ast.ContinueStmt(tok.line, tok.col)
+
     def parse_if(self) -> ast.IfStmt:
         tok = self._advance()
         cond = self.parse_expr()
@@ -183,7 +199,11 @@ class Parser:
     def parse_while(self) -> ast.WhileStmt:
         tok = self._advance()
         cond = self.parse_expr()
-        body = self.parse_block()
+        self.loop_depth += 1
+        try:
+            body = self.parse_block()
+        finally:
+            self.loop_depth -= 1
         return ast.WhileStmt(cond, body, tok.line, tok.col)
 
     def parse_fn(self) -> ast.FnStmt:
@@ -199,11 +219,17 @@ class Parser:
         self._expect(TokenType.MINUS, "'->' in return type")
         self._expect(TokenType.GT, "'>' in return type")
         ret = self._expect(TokenType.IDENT, "return type name")
-        body = self.parse_block()
+
+        saved_depth = self.loop_depth
+        self.loop_depth = 0
+        try:
+            body = self.parse_block()
+        finally:
+            self.loop_depth = saved_depth
+
         return ast.FnStmt(name.lexeme, params, ret.lexeme, body, tok.line, tok.col)
 
     def parse_expr_stmt(self) -> ast.Stmt:
-        # x = value
         if self._check(TokenType.IDENT) and self._peek_ahead(1).type is TokenType.EQ:
             name_tok = self._advance()
             self._advance()
@@ -214,14 +240,13 @@ class Parser:
 
         expr = self.parse_expr()
 
-        # a[i] = value
         if isinstance(expr, ast.Index) and self._check(TokenType.EQ):
             if not isinstance(expr.array, ast.Ident):
                 raise ParseError(
                     "cannot assign to non-variable array expression",
                     self._peek(),
                 )
-            self._advance()  # =
+            self._advance()
             value = self.parse_expr()
             self._expect(TokenType.SEMI, "';' after index assignment")
             return ast.IndexSet(

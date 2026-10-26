@@ -1,5 +1,3 @@
-import os
-
 from donky.errors import DonkyRuntimeError
 from donky.values import (
     Builtin, Environment, format_value, is_number, type_name,
@@ -197,26 +195,75 @@ def _replace(args: list[object]) -> object:
     return s.replace(old, new)
 
 
+# ---------- Session 9: input / sort ----------
+
+def _input(args: list[object]) -> object:
+    if len(args) == 0:
+        prompt = ""
+    else:
+        prompt = args[0]
+        if not isinstance(prompt, str):
+            raise DonkyRuntimeError(
+                f"input() expects string prompt, got {type_name(prompt)}"
+            )
+    try:
+        return input(prompt)
+    except EOFError:
+        raise DonkyRuntimeError("input(): end of input")
+
+
+def _sort(args: list[object]) -> object:
+    arr = args[0]
+    if not isinstance(arr, list):
+        raise DonkyRuntimeError(
+            f"sort() expects array, got {type_name(arr)}"
+        )
+    if not arr:
+        return None
+    kinds = set()
+    for e in arr:
+        if isinstance(e, bool):
+            kinds.add("bool")
+        elif isinstance(e, (int, float)):
+            kinds.add("number")
+        elif isinstance(e, str):
+            kinds.add("string")
+        else:
+            raise DonkyRuntimeError(
+                f"sort() cannot sort element of type {type_name(e)}"
+            )
+    if len(kinds) > 1:
+        joined = " and ".join(sorted(kinds))
+        raise DonkyRuntimeError(f"sort() cannot mix types: {joined}")
+    try:
+        arr.sort()
+    except TypeError as e:
+        raise DonkyRuntimeError(f"sort() failed: {e}")
+    return None
+
+
 BUILTINS = [
-    ("len",        1, _len),
-    ("str",        1, _str),
-    ("num",        1, _num),
-    ("type",       1, _type),
-    ("push",       2, _push),
-    ("pop",        1, _pop),
-    ("read_file",  1, _read_file),
-    ("write_file", 2, _write_file),
-    ("split",      2, _split),
-    ("join",       2, _join),
-    ("contains",   2, _contains),
-    ("upper",      1, _upper),
-    ("lower",      1, _lower),
-    ("trim",       1, _trim),
-    ("replace",    3, _replace),
+    ("len",        1, _len,       1),
+    ("str",        1, _str,       1),
+    ("num",        1, _num,       1),
+    ("type",       1, _type,      1),
+    ("push",       2, _push,      2),
+    ("pop",        1, _pop,       1),
+    ("read_file",  1, _read_file, 1),
+    ("write_file", 2, _write_file, 2),
+    ("split",      2, _split,     2),
+    ("join",       2, _join,      2),
+    ("contains",   2, _contains,  2),
+    ("upper",      1, _upper,     1),
+    ("lower",      1, _lower,     1),
+    ("trim",       1, _trim,      1),
+    ("replace",    3, _replace,   3),
+    ("input",      0, _input,     1),
+    ("sort",       1, _sort,      1),
 ]
 
 
 def install_builtins(env: Environment, args: list[str] | None = None) -> None:
-    for name, arity, impl in BUILTINS:
-        env.define(name, Builtin(name, arity, impl))
+    for name, arity, impl, max_arity in BUILTINS:
+        env.define(name, Builtin(name, arity, impl, max_arity))
     env.define("args", list(args) if args else [])

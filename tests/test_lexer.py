@@ -136,3 +136,16 @@ def test_div_token():
 def test_div_is_keyword_not_ident():
     toks = list(Lexer("div").tokenize())
     assert toks[0].type == TokenType.DIV
+    
+def test_break_keyword():
+    assert types("break")[0] == TokenType.BREAK
+
+
+def test_continue_keyword():
+    assert types("continue")[0] == TokenType.CONTINUE
+
+
+def test_break_not_prefix_of_identifier():
+    toks = list(Lexer("breakable").tokenize())
+    assert toks[0].type == TokenType.IDENT
+    assert toks[0].lexeme == "breakable"
