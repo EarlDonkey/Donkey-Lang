@@ -155,6 +155,8 @@ class Interpreter:
                     return self.env.get(n)
                 except DonkyRuntimeError:
                     raise self._err(expr, f"undefined variable '{n}'")
+            case ast.FnExpr(params, ret, body, line, col):
+                return Function("<anonymous>", params, body, self.env, ret)
             case ast.Unary(op, operand, line, col):
                 return self._eval_unary(op, self.eval_expr(operand), expr)
             case ast.Binary(l, "&&", r, line, col):

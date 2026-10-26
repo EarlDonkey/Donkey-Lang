@@ -150,6 +150,19 @@ class Compiler:
         else:
             self._emit(Op.STORE_GLOBAL, name)
 
+    def _compile_closure_expr(self, name: str, params: list[str],
+                               body: ast.Block) -> None:
+        """Compile a function body into a CLOSURE and leave it on the stack."""
+        fn_code = self._compile_function(name, params, body)
+        fn_idx = len(self.code.functions)
+        self.code.functions.append(fn_code)
+        for uv in fn_code.upvalues:
+            if uv.from_parent_local:
+                self._emit(Op.CAPTURE_LOCAL, uv.index)
+            else:
+                self._emit(Op.CAPTURE_UPVALUE, uv.index)
+        self._emit(Op.CLOSURE, fn_idx, len(fn_code.upvalues))
+
     def compile_stmt(self, stmt: ast.Stmt) -> None:
         line = getattr(stmt, "line", 0)
         col = getattr(stmt, "col", 0)
@@ -179,15 +192,7 @@ class Compiler:
                 self.compile_expr(value)
                 self._emit(Op.THROW)
             case ast.FnStmt(name, params, ret, body, line, col):
-                fn_code = self._compile_function(name, params, body)
-                fn_idx = len(self.code.functions)
-                self.code.functions.append(fn_code)
-                for uv in fn_code.upvalues:
-                    if uv.from_parent_local:
-                        self._emit(Op.CAPTURE_LOCAL, uv.index)
-                    else:
-                        self._emit(Op.CAPTURE_UPVALUE, uv.index)
-                self._emit(Op.CLOSURE, fn_idx, len(fn_code.upvalues))
+                self._compile_closure_expr(name, params, body)
                 self._declare_name(name)
             case ast.ReturnStmt(value, line, col):
                 if self.code.name == "<main>":
@@ -378,6 +383,8 @@ class Compiler:
                 self._emit(Op.TRUE if v else Op.FALSE)
             case ast.Ident(n, line, col):
                 self._load_name(n)
+            case ast.FnExpr(params, ret, body, line, col):
+                self._compile_closure_expr("<anonymous>", params, body)
             case ast.Unary("-", operand, line, col):
                 self.compile_expr(operand)
                 self._emit(Op.NEG)

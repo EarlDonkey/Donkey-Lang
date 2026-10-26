@@ -80,6 +80,8 @@ class Parser:
                 return ast.Unary("-", self.parse_expr(8), tok.line, tok.col)
             case TokenType.BANG:
                 return ast.Unary("!", self.parse_expr(8), tok.line, tok.col)
+            case TokenType.FN:
+                return self.parse_fn_expr(tok)
             case TokenType.LPAREN:
                 inner = self.parse_expr(0)
                 self._expect(TokenType.RPAREN, "')'")
@@ -128,6 +130,29 @@ class Parser:
             expr = ast.Index(expr, idx, expr.line, expr.col)
 
         return expr
+
+    def parse_fn_expr(self, fn_tok: Token) -> ast.FnExpr:
+        """Parse an anonymous function expression: fn(params) -> type { body }.
+        The `fn` token has already been consumed by parse_prefix."""
+        self._expect(TokenType.LPAREN, "'(' after 'fn' in anonymous function")
+        params: list[str] = []
+        if not self._check(TokenType.RPAREN):
+            params.append(self._expect(TokenType.IDENT, "parameter name").lexeme)
+            while self._match(TokenType.COMMA):
+                params.append(self._expect(TokenType.IDENT, "parameter name").lexeme)
+        self._expect(TokenType.RPAREN, "')' after parameters")
+        self._expect(TokenType.MINUS, "'->' in return type")
+        self._expect(TokenType.GT, "'>' in return type")
+        ret = self._expect(TokenType.IDENT, "return type name")
+
+        saved_depth = self.loop_depth
+        self.loop_depth = 0
+        try:
+            body = self.parse_block()
+        finally:
+            self.loop_depth = saved_depth
+
+        return ast.FnExpr(params, ret.lexeme, body, fn_tok.line, fn_tok.col)
 
     def parse(self) -> ast.Program:
         stmts: list[ast.Stmt] = []

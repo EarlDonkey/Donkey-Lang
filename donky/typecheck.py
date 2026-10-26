@@ -257,6 +257,24 @@ class TypeChecker:
                         f"undefined variable '{name}'", line, col
                     )
                 return t
+            case ast.FnExpr(params, ret, body, line, col):
+                ret_t = ANNOTATION_TO_TYPE.get(ret, TYPE_ANY)
+                self.fn_returns.append(ret_t)
+                self._push()
+                try:
+                    for p in params:
+                        self._define(p, TYPE_ANY)
+                    saved_loop = self.loop_depth
+                    self.loop_depth = 0
+                    try:
+                        for s in body.stmts:
+                            self.check_stmt(s)
+                    finally:
+                        self.loop_depth = saved_loop
+                finally:
+                    self._pop()
+                    self.fn_returns.pop()
+                return TYPE_FUNCTION
             case ast.ArrayLit():
                 for e in expr.elems:
                     self.infer(e)

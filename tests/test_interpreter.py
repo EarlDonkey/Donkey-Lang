@@ -849,3 +849,18 @@ def test_import_function(tmp_path, capsys):
     prog = modules.expand(prog, str(tmp_path))
     Interpreter().run(prog)
     assert capsys.readouterr().out == "10\n"
+
+def test_fn_expr_evaluates_to_callable(capsys):
+    run_src("let double = fn(x) -> num { return x * 2; }; print(double(5));")
+    assert capsys.readouterr().out == "10\n"
+
+
+def test_fn_expr_captures_closure(capsys):
+    run_src(
+        "fn make_adder(n) -> any {"
+        "  return fn(x) -> num { return x + n; };"
+        "}"
+        "let add5 = make_adder(5);"
+        "print(add5(10));"
+    )
+    assert capsys.readouterr().out == "15\n"

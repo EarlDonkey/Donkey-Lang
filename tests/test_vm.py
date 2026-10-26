@@ -740,3 +740,18 @@ def test_diff_import(tmp_path):
     with contextlib.redirect_stdout(buf):
         VM().run(code)
     assert buf.getvalue() == "10\n"
+    
+def test_diff_fn_expr():
+    src = "let double = fn(x) -> num { return x * 2; }; print(double(5));"
+    assert assert_same(src) == "10\n"
+
+
+def test_diff_fn_expr_closure():
+    src = (
+        "fn make_adder(n) -> any {"
+        "  return fn(x) -> num { return x + n; };"
+        "}"
+        "let add5 = make_adder(5);"
+        "print(add5(10));"
+    )
+    assert assert_same(src) == "15\n"

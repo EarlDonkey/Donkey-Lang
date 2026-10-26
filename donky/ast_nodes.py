@@ -77,6 +77,14 @@ class Index:
     line: int = 0
     col: int = 0
 
+@dataclass
+class FnExpr:
+    params: list[str]
+    return_type: str
+    body: Block
+    line: int = 0
+    col: int = 0
+
 
 # ---------- statements ----------
 
@@ -190,7 +198,7 @@ class Program:
 
 
 Expr = (NumberLit | StringLit | BoolLit | Ident | Binary | Unary
-        | Assign | Call | ArrayLit | MapLit | Index)
+        | Assign | Call | ArrayLit | MapLit | Index | FnExpr)
 Stmt = (LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | ForStmt
         | FnStmt | ReturnStmt | Block | IndexSet | BreakStmt | ContinueStmt
         | TryStmt | ThrowStmt | ImportStmt)
