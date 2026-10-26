@@ -466,3 +466,27 @@ def test_diff_closure_survives_frame():
         "print(g());"
     )
     assert assert_same(src) == "100\n"
+    
+# ---------- Session 7: I/O ----------
+
+def test_diff_args_empty():
+    assert assert_same("print(len(args));") == "0\n"
+
+
+def test_diff_read_file(tmp_path):
+    p = tmp_path / "in.txt"
+    p.write_text("hello", encoding="utf-8")
+    src = f'print(read_file("{p.as_posix()}"));'
+    assert assert_same(src) == "hello\n"
+
+
+def test_diff_write_file(tmp_path):
+    p = tmp_path / "out.txt"
+    src = f'write_file("{p.as_posix()}", "abc");'
+    assert assert_same(src) == ""
+    assert p.read_text(encoding="utf-8") == "abc"
+
+
+def test_diff_err_read_file_missing(tmp_path):
+    p = tmp_path / "nope.txt"
+    assert_same_error(f'print(read_file("{p.as_posix()}"));')

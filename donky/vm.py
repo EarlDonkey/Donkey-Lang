@@ -18,9 +18,9 @@ class Frame:
 
 
 class VM:
-    def __init__(self):
+    def __init__(self, args: list[str] | None = None):
         self.globals = Environment()
-        install_builtins(self.globals)
+        install_builtins(self.globals, args)
         self.stack: list[object] = []
         self.frames: list[Frame] = []
         self.position: tuple[int, int] = (0, 0)

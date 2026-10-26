@@ -13,10 +13,10 @@ class ReturnSignal(Exception):
 
 
 class Interpreter:
-    def __init__(self) -> None:
+    def __init__(self, args: list[str] | None = None) -> None:
         self.globals = Environment()
         self.env = self.globals
-        install_builtins(self.globals)
+        install_builtins(self.globals, args)
 
     # ---------- entry ----------
 

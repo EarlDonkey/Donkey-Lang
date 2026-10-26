@@ -1,6 +1,5 @@
 import sys
 
-from donky.bytecode import disassemble
 from donky.compiler import CompileError, Compiler
 from donky.errors import DonkyRuntimeError
 from donky.interpreter import Interpreter
@@ -10,13 +9,15 @@ from donky.vm import VM
 
 
 def main() -> None:
-    args = sys.argv[1:]
+    argv = sys.argv[1:]
     use_bytecode = False
-    if "--bytecode" in args:
+    if "--bytecode" in argv:
         use_bytecode = True
-        args.remove("--bytecode")
+        argv.remove("--bytecode")
 
-    path = args[0] if args else "examples/hello.donk"
+    path = argv[0] if argv else "examples/hello.donk"
+    script_args = argv[1:]
+
     try:
         with open(path, encoding="utf-8-sig") as f:
             src = f.read()
@@ -29,9 +30,9 @@ def main() -> None:
         prog = Parser(toks).parse()
         if use_bytecode:
             code = Compiler().compile(prog)
-            VM().run(code)
+            VM(args=script_args).run(code)
         else:
-            Interpreter().run(prog)
+            Interpreter(args=script_args).run(prog)
     except LexError as e:
         print(f"{path}: {e}", file=sys.stderr)
         sys.exit(1)
