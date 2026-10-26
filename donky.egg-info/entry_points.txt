@@ -1,0 +1,2 @@
+[console_scripts]
+donky = donky.run:main

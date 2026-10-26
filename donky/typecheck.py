@@ -35,6 +35,14 @@ BUILTIN_RETURNS = {
     "tcp_read":    TYPE_STRING,
     "tcp_write":   TYPE_ANY,
     "tcp_close":   TYPE_ANY,
+    "tcp_listen":  TYPE_NUMBER,
+    "tcp_accept":  TYPE_NUMBER,
+    "tcp_read":    TYPE_STRING,
+    "tcp_write":   TYPE_ANY,
+    "tcp_close":   TYPE_ANY,
+    "url_decode":  TYPE_STRING,
+    "mime_type":   TYPE_STRING,
+    "spawn":       TYPE_ANY,
 }
 
 

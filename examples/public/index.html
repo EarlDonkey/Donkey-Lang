@@ -1,15 +1,19 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Donky Server</title>
-    <style>
-        body { background: #2b2b2b; color: #a9b7c6; font-family: monospace; text-align: center; padding-top: 50px; }
-        h1 { color: #cc7832; font-size: 3em; }
-        p { font-size: 1.2em; }
-    </style>
+    <title>Donky Guestbook</title>
+    <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-    <h1>Hello from Donky!</h1>
-    <p>This HTML is being served by a web server written in Donky.</p>
+    <h1>Donky Guestbook</h1>
+    <form method="POST" action="/sign">
+        <input type="text" name="name" placeholder="Your name" required>
+        <textarea name="message" placeholder="Your message..." required></textarea>
+        <button type="submit">Sign the Guestbook</button>
+    </form>
+    <hr>
+    <div id="entries">
+        {{ENTRIES}}
+    </div>
 </body>
 </html>

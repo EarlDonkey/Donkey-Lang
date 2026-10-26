@@ -38,7 +38,7 @@ class Interpreter:
     def exec_stmt(self, stmt: ast.Stmt) -> None:
         match stmt:
             case ast.StructDefStmt():
-                pass # Type-only, does nothing at runtime
+                pass
             case ast.LetStmt(name, value, line, col):
                 self.env.define(name, self.eval_expr(value))
             case ast.PrintStmt(value, line, col):
@@ -89,9 +89,7 @@ class Interpreter:
             case ast.ThrowStmt(value, line, col):
                 msg = self.eval_expr(value)
                 if not isinstance(msg, str):
-                    raise self._err(
-                        stmt, f"throw expects string, got {type_name(msg)}"
-                    )
+                    raise self._err(stmt, f"throw expects string, got {type_name(msg)}")
                 raise self._err(stmt, msg)
             case ast.FnStmt(name, params, ret, body, line, col):
                 self.env.define(name, Function(name, params, body, self.env, ret))
@@ -110,10 +108,7 @@ class Interpreter:
                 except DonkyRuntimeError:
                     raise self._err(stmt, f"undefined variable '{name}'")
                 if isinstance(container, str):
-                    raise self._err(
-                        stmt,
-                        "cannot assign to string index (strings are immutable)",
-                    )
+                    raise self._err(stmt, "cannot assign to string index (strings are immutable)")
                 index = self.eval_expr(index_expr)
                 value = self.eval_expr(value_expr)
                 if isinstance(container, dict):
@@ -140,38 +135,26 @@ class Interpreter:
             self.env = saved
 
     def _iterable(self, container: object, node: object) -> list:
-        if isinstance(container, list):
-            return list(container)
-        if isinstance(container, str):
-            return list(container)
-        if isinstance(container, dict):
-            return list(container.keys())
-        raise self._err(
-            node, f"cannot iterate {type_name(container)}"
-        )
+        if isinstance(container, list): return list(container)
+        if isinstance(container, str): return list(container)
+        if isinstance(container, dict): return list(container.keys())
+        raise self._err(node, f"cannot iterate {type_name(container)}")
 
     def eval_expr(self, expr: ast.Expr) -> object:
         match expr:
-            case ast.NumberLit(v, line, col):
-                return v
-            case ast.StringLit(v, line, col):
-                return v
-            case ast.BoolLit(v, line, col):
-                return v
+            case ast.NumberLit(v, line, col): return v
+            case ast.StringLit(v, line, col): return v
+            case ast.BoolLit(v, line, col): return v
             case ast.Ident(n, line, col):
-                try:
-                    return self.env.get(n)
-                except DonkyRuntimeError:
-                    raise self._err(expr, f"undefined variable '{n}'")
+                try: return self.env.get(n)
+                except DonkyRuntimeError: raise self._err(expr, f"undefined variable '{n}'")
             case ast.FnExpr(params, ret, body, line, col):
                 return Function("<anonymous>", params, body, self.env, ret)
             case ast.InterpolatedString(parts, line, col):
                 result = []
                 for p in parts:
-                    if isinstance(p, str):
-                        result.append(p)
-                    else:
-                        result.append(format_value(self.eval_expr(p)))
+                    if isinstance(p, str): result.append(p)
+                    else: result.append(format_value(self.eval_expr(p)))
                 return "".join(result)
             case ast.StructInit(name, fields, line, col):
                 result = {}
@@ -191,8 +174,7 @@ class Interpreter:
                 left = self.eval_expr(l)
                 if not isinstance(left, bool):
                     raise self._err(expr, f"'&&' expects bool, got {type_name(left)}")
-                if not left:
-                    return False
+                if not left: return False
                 right = self.eval_expr(r)
                 if not isinstance(right, bool):
                     raise self._err(expr, f"'&&' expects bool, got {type_name(right)}")
@@ -201,8 +183,7 @@ class Interpreter:
                 left = self.eval_expr(l)
                 if not isinstance(left, bool):
                     raise self._err(expr, f"'||' expects bool, got {type_name(left)}")
-                if left:
-                    return True
+                if left: return True
                 right = self.eval_expr(r)
                 if not isinstance(right, bool):
                     raise self._err(expr, f"'||' expects bool, got {type_name(right)}")
@@ -211,10 +192,8 @@ class Interpreter:
                 return self._eval_binary(op, self.eval_expr(l), self.eval_expr(r), expr)
             case ast.Assign(n, v, line, col):
                 val = self.eval_expr(v)
-                try:
-                    self.env.assign(n, val)
-                except DonkyRuntimeError:
-                    raise self._err(expr, f"assignment to undefined variable '{n}'")
+                try: self.env.assign(n, val)
+                except DonkyRuntimeError: raise self._err(expr, f"assignment to undefined variable '{n}'")
                 return val
             case ast.Call(callee, args, line, col):
                 try:
@@ -222,10 +201,7 @@ class Interpreter:
                 except DonkyRuntimeError:
                     raise self._err(expr, f"undefined function '{callee}'")
                 if not isinstance(fn, (Function, Builtin)):
-                    raise self._err(
-                        expr,
-                        f"'{callee}' is not a function (got {type_name(fn)})",
-                    )
+                    raise self._err(expr, f"'{callee}' is not a function (got {type_name(fn)})")
                 argvals = [self.eval_expr(a) for a in args]
                 if isinstance(fn, Builtin):
                     return self._call_builtin(fn, argvals, expr)
@@ -244,9 +220,7 @@ class Interpreter:
                 index = self.eval_expr(index_expr)
                 if isinstance(container, dict):
                     if index not in container:
-                        raise self._err(
-                            expr, f"key {format_value(index)!r} not in map"
-                        )
+                        raise self._err(expr, f"key {format_value(index)!r} not in map")
                     return container[index]
                 self._check_index(container, index, expr)
                 return container[index]
@@ -255,105 +229,63 @@ class Interpreter:
 
     def _check_index(self, array: object, index: object, node: object) -> None:
         if not isinstance(array, (list, str)):
-            raise self._err(
-                node,
-                f"cannot index {type_name(array)}, expected array or string",
-            )
+            raise self._err(node, f"cannot index {type_name(array)}, expected array or string")
         if not is_int(index):
-            raise self._err(
-                node, f"index must be integer, got {type_name(index)}"
-            )
+            raise self._err(node, f"index must be integer, got {type_name(index)}")
         if index < 0 or index >= len(array):
-            raise self._err(
-                node, f"index {index} out of range for length {len(array)}"
-            )
+            raise self._err(node, f"index {index} out of range for length {len(array)}")
 
     def _eval_unary(self, op: str, operand: object, node: ast.Expr) -> object:
         if op == "-":
             if not is_number(operand):
-                raise self._err(
-                    node, f"unary '-' expects number, got {type_name(operand)}"
-                )
+                raise self._err(node, f"unary '-' expects number, got {type_name(operand)}")
             return -operand
         if op == "!":
             if not isinstance(operand, bool):
-                raise self._err(
-                    node, f"unary '!' expects bool, got {type_name(operand)}"
-                )
+                raise self._err(node, f"unary '!' expects bool, got {type_name(operand)}")
             return not operand
         raise DonkyRuntimeError(f"unknown unary operator '{op}'")
 
-    def _eval_binary(self, op: str, left: object, right: object,
-                     node: ast.Expr) -> object:
+    def _eval_binary(self, op: str, left: object, right: object, node: ast.Expr) -> object:
         if op == "+":
-            if is_number(left) and is_number(right):
-                return left + right
-            if isinstance(left, str) and isinstance(right, str):
-                return left + right
-            raise self._err(
-                node,
-                f"'+' needs two numbers or two strings, got "
-                f"{type_name(left)} and {type_name(right)}",
-            )
+            if is_number(left) and is_number(right): return left + right
+            if isinstance(left, str) and isinstance(right, str): return left + right
+            raise self._err(node, f"'+' needs two numbers or two strings, got {type_name(left)} and {type_name(right)}")
         if op == "div":
             if not (is_number(left) and is_number(right)):
-                raise self._err(
-                    node,
-                    f"'div' needs two numbers, got "
-                    f"{type_name(left)} and {type_name(right)}",
-                )
+                raise self._err(node, f"'div' needs two numbers, got {type_name(left)} and {type_name(right)}")
             if not (is_int(left) and is_int(right)):
                 raise self._err(node, "'div' expects integers, not floats")
-            if right == 0:
-                raise self._err(node, "integer division by zero")
+            if right == 0: raise self._err(node, "integer division by zero")
             q = abs(left) // abs(right)
-            if (left < 0) != (right < 0):
-                return -q
+            if (left < 0) != (right < 0): return -q
             return q
         if op in ("-", "*", "/", "%"):
             if not (is_number(left) and is_number(right)):
-                raise self._err(
-                    node,
-                    f"'{op}' needs two numbers, got "
-                    f"{type_name(left)} and {type_name(right)}",
-                )
-            if op == "-":
-                return left - right
-            if op == "*":
-                return left * right
+                raise self._err(node, f"'{op}' needs two numbers, got {type_name(left)} and {type_name(right)}")
+            if op == "-": return left - right
+            if op == "*": return left * right
             if op == "%":
-                if right == 0:
-                    raise self._err(node, "modulo by zero")
+                if right == 0: raise self._err(node, "modulo by zero")
                 return left % right
-            if right == 0:
-                raise self._err(node, "division by zero")
+            if right == 0: raise self._err(node, "division by zero")
             return left / right
-        if op == "==":
-            return left == right
-        if op == "!=":
-            return left != right
+        if op == "==": return left == right
+        if op == "!=": return left != right
         if op in ("<", "<=", ">", ">="):
             both_num = is_number(left) and is_number(right)
             both_str = isinstance(left, str) and isinstance(right, str)
             if not (both_num or both_str):
-                raise self._err(
-                    node,
-                    f"'{op}' needs two numbers or two strings, got "
-                    f"{type_name(left)} and {type_name(right)}",
-                )
+                raise self._err(node, f"'{op}' needs two numbers or two strings, got {type_name(left)} and {type_name(right)}")
             if op == "<":  return left < right
             if op == "<=": return left <= right
             if op == ">":  return left > right
             return left >= right
         raise DonkyRuntimeError(f"unknown operator '{op}'")
 
-    def call_function(self, fn: Function, args: list[object],
-                      node: ast.Expr) -> object:
+    def call_function(self, fn: Function, args: list[object], node: ast.Expr) -> object:
         if len(args) != len(fn.params):
-            raise self._err(
-                node,
-                f"{fn.name}() expects {len(fn.params)} argument(s), got {len(args)}",
-            )
+            raise self._err(node, f"{fn.name}() expects {len(fn.params)} argument(s), got {len(args)}")
         call_env = Environment(parent=fn.closure)
         for p, a in zip(fn.params, args):
             call_env.define(p, a)
@@ -369,16 +301,38 @@ class Interpreter:
             self.env = saved
         return None
 
-    def _call_builtin(self, fn: Builtin, args: list[object],
-                      node: ast.Expr) -> object:
+    def _call_builtin(self, fn: Builtin, args: list[object], node: ast.Expr) -> object:
         max_a = fn.max_arity if fn.max_arity is not None else fn.arity
         if not (fn.arity <= len(args) <= max_a):
             if fn.arity == max_a:
                 msg = f"{fn.name}() expects {fn.arity} argument(s), got {len(args)}"
             else:
-                msg = (f"{fn.name}() expects {fn.arity} or {max_a} "
-                       f"argument(s), got {len(args)}")
+                msg = f"{fn.name}() expects {fn.arity} or {max_a} argument(s), got {len(args)}"
             raise self._err(node, msg)
+
+        # --- Concurrency Logic ---
+        # --- Concurrency Logic ---
+        if fn.name == "spawn":
+            import threading
+            target_fn = args[0]
+            if not isinstance(target_fn, Function):
+                raise self._err(node, "spawn() expects a function")
+            
+            def thread_worker():
+                # Create a completely fresh interpreter for the thread
+                new_interp = Interpreter()
+                new_interp.globals = self.globals
+                new_interp.env = self.globals
+                try:
+                    new_interp.call_function(target_fn, [], node)
+                except Exception as e:
+                    print(f"Thread error: {e}")
+                    
+            t = threading.Thread(target=thread_worker, daemon=True)
+            t.start()
+            return None
+        # --------------------------
+
         try:
             return fn.impl(args)
         except DonkyRuntimeError as e:

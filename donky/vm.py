@@ -75,149 +75,100 @@ class VM:
         op = instr[0]
 
         match op:
-            case Op.CONST:
-                self.stack.append(frame.code.constants[instr[1]])
-            case Op.TRUE:
-                self.stack.append(True)
-            case Op.FALSE:
-                self.stack.append(False)
-            case Op.POP:
-                self.stack.pop()
-            case Op.LOAD_LOCAL:
-                self.stack.append(frame.slots[instr[1]].value)
-            case Op.STORE_LOCAL:
-                frame.slots[instr[1]].value = self.stack.pop()
-            case Op.LOAD_UPVALUE:
-                self.stack.append(frame.closure.upvalues[instr[1]].value)
-            case Op.STORE_UPVALUE:
-                frame.closure.upvalues[instr[1]].value = self.stack.pop()
-            case Op.CAPTURE_LOCAL:
-                self.stack.append(frame.slots[instr[1]])
-            case Op.CAPTURE_UPVALUE:
-                self.stack.append(frame.closure.upvalues[instr[1]])
-            case Op.DEFINE_GLOBAL:
-                self.globals.define(instr[1], self.stack.pop())
+            case Op.CONST: self.stack.append(frame.code.constants[instr[1]])
+            case Op.TRUE: self.stack.append(True)
+            case Op.FALSE: self.stack.append(False)
+            case Op.POP: self.stack.pop()
+            case Op.LOAD_LOCAL: self.stack.append(frame.slots[instr[1]].value)
+            case Op.STORE_LOCAL: frame.slots[instr[1]].value = self.stack.pop()
+            case Op.LOAD_UPVALUE: self.stack.append(frame.closure.upvalues[instr[1]].value)
+            case Op.STORE_UPVALUE: frame.closure.upvalues[instr[1]].value = self.stack.pop()
+            case Op.CAPTURE_LOCAL: self.stack.append(frame.slots[instr[1]])
+            case Op.CAPTURE_UPVALUE: self.stack.append(frame.closure.upvalues[instr[1]])
+            case Op.DEFINE_GLOBAL: self.globals.define(instr[1], self.stack.pop())
             case Op.LOAD_GLOBAL:
-                try:
-                    self.stack.append(self.globals.get(instr[1]))
-                except DonkyRuntimeError:
-                    raise self._err(f"undefined variable '{instr[1]}'")
+                try: self.stack.append(self.globals.get(instr[1]))
+                except DonkyRuntimeError: raise self._err(f"undefined variable '{instr[1]}'")
             case Op.STORE_GLOBAL:
-                try:
-                    self.globals.assign(instr[1], self.stack.pop())
-                except DonkyRuntimeError:
-                    raise self._err(
-                        f"assignment to undefined variable '{instr[1]}'"
-                    )
+                try: self.globals.assign(instr[1], self.stack.pop())
+                except DonkyRuntimeError: raise self._err(f"assignment to undefined variable '{instr[1]}'")
             case Op.ADD:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self.stack.append(self._add(l, r))
             case Op.SUB:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self._check_num("-", l, r)
                 self.stack.append(l - r)
             case Op.MUL:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self._check_num("*", l, r)
                 self.stack.append(l * r)
             case Op.DIV:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self._check_num("/", l, r)
-                if r == 0:
-                    raise self._err("division by zero")
+                if r == 0: raise self._err("division by zero")
                 self.stack.append(l / r)
             case Op.MOD:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self._check_num("%", l, r)
-                if r == 0:
-                    raise self._err("modulo by zero")
+                if r == 0: raise self._err("modulo by zero")
                 self.stack.append(l % r)
             case Op.FLOOR_DIV:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self.stack.append(self._floor_div(l, r))
             case Op.NEG:
                 v = self.stack.pop()
-                if not is_number(v):
-                    raise self._err(
-                        f"unary '-' expects number, got {type_name(v)}"
-                    )
+                if not is_number(v): raise self._err(f"unary '-' expects number, got {type_name(v)}")
                 self.stack.append(-v)
             case Op.NOT:
                 v = self.stack.pop()
-                if not isinstance(v, bool):
-                    raise self._err(
-                        f"unary '!' expects bool, got {type_name(v)}"
-                    )
+                if not isinstance(v, bool): raise self._err(f"unary '!' expects bool, got {type_name(v)}")
                 self.stack.append(not v)
             case Op.EQ:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self.stack.append(l == r)
             case Op.NE:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self.stack.append(l != r)
             case Op.LT:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self._check_cmp("<", l, r)
                 self.stack.append(l < r)
             case Op.LE:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self._check_cmp("<=", l, r)
                 self.stack.append(l <= r)
             case Op.GT:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self._check_cmp(">", l, r)
                 self.stack.append(l > r)
             case Op.GE:
-                r = self.stack.pop()
-                l = self.stack.pop()
+                r = self.stack.pop(); l = self.stack.pop()
                 self._check_cmp(">=", l, r)
                 self.stack.append(l >= r)
-            case Op.JUMP:
-                frame.ip = instr[1]
+            case Op.JUMP: frame.ip = instr[1]
             case Op.JUMP_IF_FALSE:
                 v = self.stack.pop()
-                if not isinstance(v, bool):
-                    raise self._err(
-                        f"condition must be bool, got {type_name(v)}"
-                    )
-                if not v:
-                    frame.ip = instr[1]
+                if not isinstance(v, bool): raise self._err(f"condition must be bool, got {type_name(v)}")
+                if not v: frame.ip = instr[1]
             case Op.JUMP_IF_FALSE_PEEK:
                 v = self.stack[-1]
-                if not isinstance(v, bool):
-                    raise self._err(f"'&&' expects bool, got {type_name(v)}")
-                if not v:
-                    frame.ip = instr[1]
+                if not isinstance(v, bool): raise self._err(f"'&&' expects bool, got {type_name(v)}")
+                if not v: frame.ip = instr[1]
             case Op.JUMP_IF_TRUE_PEEK:
                 v = self.stack[-1]
-                if not isinstance(v, bool):
-                    raise self._err(f"'||' expects bool, got {type_name(v)}")
-                if v:
-                    frame.ip = instr[1]
+                if not isinstance(v, bool): raise self._err(f"'||' expects bool, got {type_name(v)}")
+                if v: frame.ip = instr[1]
             case Op.CLOSURE:
-                fn_idx = instr[1]
-                n_upvals = instr[2]
+                fn_idx = instr[1]; n_upvals = instr[2]
                 cells = [self.stack.pop() for _ in range(n_upvals)]
                 cells.reverse()
                 self.stack.append(Closure(frame.code.functions[fn_idx], cells))
-            case Op.CALL:
-                self._call(instr[1], instr[2])
+            case Op.CALL: self._call(instr[1], instr[2])
             case Op.RETURN:
                 v = self.stack.pop()
                 self._return(v)
-            case Op.PRINT:
-                print(format_value(self.stack.pop()))
+            case Op.PRINT: print(format_value(self.stack.pop()))
             case Op.NEW_ARRAY:
                 n = instr[1]
                 elems = [self.stack.pop() for _ in range(n)]
@@ -229,128 +180,79 @@ class VM:
                 entries.reverse()
                 result = {}
                 for i in range(n):
-                    k = entries[2 * i]
-                    v = entries[2 * i + 1]
-                    if isinstance(k, (list, dict)):
-                        raise self._err(
-                            f"map key cannot be {type_name(k)}"
-                        )
+                    k = entries[2 * i]; v = entries[2 * i + 1]
+                    if isinstance(k, (list, dict)): raise self._err(f"map key cannot be {type_name(k)}")
                     result[k] = v
                 self.stack.append(result)
             case Op.NEW_ITER:
                 container = self.stack.pop()
-                if isinstance(container, dict):
-                    self.stack.append(iter(list(container.keys())))
-                elif isinstance(container, (list, str)):
-                    self.stack.append(iter(list(container)))
-                else:
-                    raise self._err(
-                        f"cannot iterate {type_name(container)}"
-                    )
+                if isinstance(container, dict): self.stack.append(iter(list(container.keys())))
+                elif isinstance(container, (list, str)): self.stack.append(iter(list(container)))
+                else: raise self._err(f"cannot iterate {type_name(container)}")
             case Op.ITER_NEXT:
                 it = self.stack[-1]
-                try:
-                    val = next(it)
-                except StopIteration:
-                    frame.ip = instr[1]
-                else:
-                    self.stack.append(val)
+                try: val = next(it)
+                except StopIteration: frame.ip = instr[1]
+                else: self.stack.append(val)
             case Op.INDEX_GET:
-                index = self.stack.pop()
-                container = self.stack.pop()
+                index = self.stack.pop(); container = self.stack.pop()
                 if isinstance(container, dict):
                     if index not in container:
-                        raise self._err(
-                            f"key {format_value(index)!r} not in map"
-                        )
+                        raise self._err(f"key {format_value(index)!r} not in map")
                     self.stack.append(container[index])
                 else:
                     self._check_index(container, index)
                     self.stack.append(container[index])
             case Op.INDEX_SET:
-                value = self.stack.pop()
-                index = self.stack.pop()
-                container = self.stack.pop()
-                if isinstance(container, str):
-                    raise self._err(
-                        "cannot assign to string index (strings are immutable)"
-                    )
+                value = self.stack.pop(); index = self.stack.pop(); container = self.stack.pop()
+                if isinstance(container, str): raise self._err("cannot assign to string index (strings are immutable)")
                 if isinstance(container, dict):
-                    if isinstance(index, (list, dict)):
-                        raise self._err(
-                            f"map key cannot be {type_name(index)}"
-                        )
+                    if isinstance(index, (list, dict)): raise self._err(f"map key cannot be {type_name(index)}")
                     container[index] = value
                 else:
                     self._check_index(container, index)
                     container[index] = value
             case Op.PUSH_TRY:
                 frame.handlers.append((instr[1], len(self.stack)))
-            case Op.POP_TRY:
-                frame.handlers.pop()
+            case Op.POP_TRY: frame.handlers.pop()
             case Op.THROW:
                 msg = self.stack.pop()
-                if not isinstance(msg, str):
-                    raise self._err(
-                        f"throw expects string, got {type_name(msg)}"
-                    )
+                if not isinstance(msg, str): raise self._err(f"throw expects string, got {type_name(msg)}")
                 raise self._err(msg)
-            case _:
-                raise self._err(f"unknown opcode {op}")
+            case _: raise self._err(f"unknown opcode {op}")
 
     def _add(self, l: object, r: object) -> object:
-        if is_number(l) and is_number(r):
-            return l + r
-        if isinstance(l, str) and isinstance(r, str):
-            return l + r
-        raise self._err(
-            f"'+' needs two numbers or two strings, got "
-            f"{type_name(l)} and {type_name(r)}"
-        )
+        if is_number(l) and is_number(r): return l + r
+        if isinstance(l, str) and isinstance(r, str): return l + r
+        raise self._err(f"'+' needs two numbers or two strings, got {type_name(l)} and {type_name(r)}")
 
     def _check_num(self, op: str, l: object, r: object) -> None:
         if not (is_number(l) and is_number(r)):
-            raise self._err(
-                f"'{op}' needs two numbers, got "
-                f"{type_name(l)} and {type_name(r)}"
-            )
+            raise self._err(f"'{op}' needs two numbers, got {type_name(l)} and {type_name(r)}")
 
     def _check_cmp(self, op: str, l: object, r: object) -> None:
         both_num = is_number(l) and is_number(r)
         both_str = isinstance(l, str) and isinstance(r, str)
         if not (both_num or both_str):
-            raise self._err(
-                f"'{op}' needs two numbers or two strings, got "
-                f"{type_name(l)} and {type_name(r)}"
-            )
+            raise self._err(f"'{op}' needs two numbers or two strings, got {type_name(l)} and {type_name(r)}")
 
     def _floor_div(self, l: object, r: object) -> object:
         if not (is_number(l) and is_number(r)):
-            raise self._err(
-                f"'div' needs two numbers, got {type_name(l)} and {type_name(r)}"
-            )
+            raise self._err(f"'div' needs two numbers, got {type_name(l)} and {type_name(r)}")
         if not (is_int(l) and is_int(r)):
             raise self._err("'div' expects integers, not floats")
-        if r == 0:
-            raise self._err("integer division by zero")
+        if r == 0: raise self._err("integer division by zero")
         q = abs(l) // abs(r)
-        if (l < 0) != (r < 0):
-            return -q
+        if (l < 0) != (r < 0): return -q
         return q
 
     def _check_index(self, array: object, index: object) -> None:
         if not isinstance(array, (list, str)):
-            raise self._err(
-                f"cannot index {type_name(array)}, expected array or string"
-            )
+            raise self._err(f"cannot index {type_name(array)}, expected array or string")
         if not is_int(index):
-            raise self._err(
-                f"index must be integer, got {type_name(index)}"
-            )
+            raise self._err(f"index must be integer, got {type_name(index)}")
         if index < 0 or index >= len(array):
-            raise self._err(
-                f"index {index} out of range for length {len(array)}"
-            )
+            raise self._err(f"index {index} out of range for length {len(array)}")
 
     def _call(self, argc: int, name: str) -> None:
         args = [self.stack.pop() for _ in range(argc)]
@@ -361,26 +263,45 @@ class VM:
             max_a = callee.max_arity if callee.max_arity is not None else callee.arity
             if not (callee.arity <= len(args) <= max_a):
                 if callee.arity == max_a:
-                    msg = (f"{callee.name}() expects {callee.arity} "
-                           f"argument(s), got {len(args)}")
+                    msg = f"{callee.name}() expects {callee.arity} argument(s), got {len(args)}"
                 else:
-                    msg = (f"{callee.name}() expects {callee.arity} or "
-                           f"{max_a} argument(s), got {len(args)}")
+                    msg = f"{callee.name}() expects {callee.arity} or {max_a} argument(s), got {len(args)}"
                 raise self._err(msg)
+
+            # --- Concurrency Logic ---
+            if callee.name == "spawn":
+                import threading
+                target_fn = args[0]
+                if not isinstance(target_fn, Closure):
+                    raise self._err("spawn() expects a function")
+                
+                def thread_worker():
+                    new_vm = VM()
+                    new_vm.globals = self.globals
+                    # We just push the new frame and start the loop.
+                    new_frame = Frame(target_fn.code, target_fn)
+                    new_vm.frames.append(new_frame)
+                    try:
+                        new_vm._execute()
+                    except Exception as e:
+                        print(f"Thread error: {e}")
+                        
+                t = threading.Thread(target=thread_worker, daemon=True)
+                t.start()
+                self.stack.append(None)
+                return
+            # --------------------------
+
             try:
                 result = callee.impl(args)
             except DonkyRuntimeError as e:
-                if e.line == 0:
-                    raise self._err(e.message) from None
+                if e.line == 0: raise self._err(e.message) from None
                 raise
             self.stack.append(result)
 
         elif isinstance(callee, Closure):
             if len(args) != callee.code.arity:
-                raise self._err(
-                    f"{callee.code.name}() expects {callee.code.arity} "
-                    f"argument(s), got {len(args)}"
-                )
+                raise self._err(f"{callee.code.name}() expects {callee.code.arity} argument(s), got {len(args)}")
             new_frame = Frame(callee.code, callee)
             for i, a in enumerate(args):
                 new_frame.slots[i].value = a
@@ -388,19 +309,14 @@ class VM:
 
         elif isinstance(callee, CodeObject):
             if len(args) != callee.arity:
-                raise self._err(
-                    f"{callee.name}() expects {callee.arity} "
-                    f"argument(s), got {len(args)}"
-                )
+                raise self._err(f"{callee.name}() expects {callee.arity} argument(s), got {len(args)}")
             new_frame = Frame(callee, Closure(callee, []))
             for i, a in enumerate(args):
                 new_frame.slots[i].value = a
             self.frames.append(new_frame)
 
         else:
-            raise self._err(
-                f"'{name}' is not a function (got {type_name(callee)})"
-            )
+            raise self._err(f"'{name}' is not a function (got {type_name(callee)})")
 
     def _return(self, value: object) -> None:
         self.frames.pop()
