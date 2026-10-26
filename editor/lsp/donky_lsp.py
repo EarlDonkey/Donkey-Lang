@@ -261,6 +261,10 @@ def _find_node_at(program: ast.Program, line: int, col: int):
         elif isinstance(node, ast.IndexSet):
             walk(node.index); walk(node.value)
         elif isinstance(node, ast.ThrowStmt): walk(node.value)
+        elif isinstance(node, ast.InterpolatedString):
+            for p in node.parts:
+                if not isinstance(p, str):
+                    walk(p)
 
     walk(program)
     return found

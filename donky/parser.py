@@ -1,4 +1,4 @@
-from donky.lexer import Token, TokenType
+from donky.lexer import Token, TokenType, Lexer, LexError
 from donky import ast_nodes as ast
 
 
@@ -64,6 +64,52 @@ class Parser:
             left = ast.Binary(left, op.lexeme, right, op.line, op.col)
         return left
 
+    def _parse_interpolation(self, tok: Token) -> ast.Expr:
+        raw = tok.literal
+        parts = []
+        current_text = ""
+        i = 0
+        while i < len(raw):
+            if raw[i] == '$' and i + 1 < len(raw) and raw[i+1] == '{':
+                if current_text:
+                    parts.append(current_text)
+                    current_text = ""
+                depth = 1
+                j = i + 2
+                while j < len(raw) and depth > 0:
+                    if raw[j] == '{': depth += 1
+                    elif raw[j] == '}': depth -= 1
+                    j += 1
+                if depth > 0:
+                    raise ParseError("unclosed interpolation", tok)
+                
+                expr_text = raw[i+2 : j-1]
+                try:
+                    sub_toks = Lexer(expr_text).tokenize()
+                    sub_parser = Parser(sub_toks)
+                    expr = sub_parser.parse_expr()
+                    if not sub_parser._check(TokenType.EOF):
+                        raise ParseError("unexpected tokens after interpolation expr", tok)
+                except (LexError, ParseError) as e:
+                    raise ParseError(f"in interpolation: {e}", tok)
+                    
+                parts.append(expr)
+                i = j
+            elif raw[i] == '\0':
+                current_text += '$'
+                i += 1
+            else:
+                current_text += raw[i]
+                i += 1
+                
+        if current_text:
+            parts.append(current_text)
+            
+        if len(parts) == 1 and isinstance(parts[0], str):
+            return ast.StringLit(parts[0], tok.line, tok.col)
+            
+        return ast.InterpolatedString(parts, tok.line, tok.col)
+
     def parse_prefix(self) -> ast.Expr:
         tok = self._advance()
 
@@ -72,6 +118,8 @@ class Parser:
                 expr = ast.NumberLit(tok.literal, tok.line, tok.col)
             case TokenType.STRING:
                 expr = ast.StringLit(tok.literal, tok.line, tok.col)
+            case TokenType.STRING_INTERP:
+                return self._parse_interpolation(tok)
             case TokenType.TRUE:
                 expr = ast.BoolLit(True, tok.line, tok.col)
             case TokenType.FALSE:
@@ -132,8 +180,6 @@ class Parser:
         return expr
 
     def parse_fn_expr(self, fn_tok: Token) -> ast.FnExpr:
-        """Parse an anonymous function expression: fn(params) -> type { body }.
-        The `fn` token has already been consumed by parse_prefix."""
         self._expect(TokenType.LPAREN, "'(' after 'fn' in anonymous function")
         params: list[str] = []
         if not self._check(TokenType.RPAREN):

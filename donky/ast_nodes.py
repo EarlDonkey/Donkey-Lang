@@ -85,6 +85,12 @@ class FnExpr:
     line: int = 0
     col: int = 0
 
+@dataclass
+class InterpolatedString:
+    parts: list[str | Expr]
+    line: int = 0
+    col: int = 0
+
 
 # ---------- statements ----------
 
@@ -198,7 +204,7 @@ class Program:
 
 
 Expr = (NumberLit | StringLit | BoolLit | Ident | Binary | Unary
-        | Assign | Call | ArrayLit | MapLit | Index | FnExpr)
+        | Assign | Call | ArrayLit | MapLit | Index | FnExpr | InterpolatedString)
 Stmt = (LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | ForStmt
         | FnStmt | ReturnStmt | Block | IndexSet | BreakStmt | ContinueStmt
         | TryStmt | ThrowStmt | ImportStmt)

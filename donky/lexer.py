@@ -5,6 +5,7 @@ from dataclasses import dataclass
 class TokenType(Enum):
     NUMBER = auto()
     STRING = auto()
+    STRING_INTERP = auto()
     IDENT = auto()
     LET = auto()
     FN = auto()
@@ -198,23 +199,36 @@ class Lexer:
 
     def _read_string(self, line: int, col: int) -> Token:
         chars: list[str] = []
+        has_interp = False
         while not self._at_end() and self._peek() != '"':
             ch = self._advance()
             if ch == "\\":
                 if self._at_end():
                     break
                 esc = self._advance()
-                mapping = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
-                if esc not in mapping:
-                    raise LexError(f"unknown escape '\\{esc}'", self.line, self.col)
-                chars.append(mapping[esc])
+                if esc == "$":
+                    chars.append("\0")
+                else:
+                    mapping = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
+                    if esc not in mapping:
+                        raise LexError(f"unknown escape '\\{esc}'", self.line, self.col)
+                    chars.append(mapping[esc])
+            elif ch == "$" and self._peek() == "{":
+                has_interp = True
+                chars.append("${")
+                self._advance()
             else:
                 chars.append(ch)
         if self._at_end():
             raise LexError("unterminated string", line, col)
         self._advance()
         value = "".join(chars)
-        return Token(TokenType.STRING, f'"{value}"', value, line, col)
+        
+        if not has_interp:
+            value = value.replace("\0", "$")
+            return Token(TokenType.STRING, f'"{value}"', value, line, col)
+            
+        return Token(TokenType.STRING_INTERP, f'"{value}"', value, line, col)
 
     def _read_number(self, first: str, line: int, col: int) -> Token:
         chars = [first]

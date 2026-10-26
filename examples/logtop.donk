@@ -61,9 +61,7 @@ fn analyze(path, field, limit) -> void {
     }
     let ranked = reverse(sort_by(entries, fn(pair) -> num { return pair[1]; }));
 
-    print("=== " + field + " — total " + str(total)
-          + " entries, " + str(len(counts)) + " unique"
-          + " — top " + str(limit) + " ===");
+    print("=== ${field} — total ${total} entries, ${len(counts)} unique — top ${limit} ===");
     let shown = 0;
     for pair in ranked {
         if shown >= limit { break; }

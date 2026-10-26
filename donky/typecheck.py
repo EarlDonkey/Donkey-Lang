@@ -9,16 +9,6 @@ TYPE_ARRAY = "array"
 TYPE_MAP = "map"
 TYPE_FUNCTION = "function"
 
-ANNOTATION_TO_TYPE = {
-    "num":   TYPE_NUMBER,
-    "str":   TYPE_STRING,
-    "bool":  TYPE_BOOL,
-    "array": TYPE_ARRAY,
-    "map":   TYPE_MAP,
-    "any":   TYPE_ANY,
-    "void":  TYPE_ANY,   # no strict "no return" enforcement yet
-}
-
 
 BUILTIN_RETURNS = {
     "len":         TYPE_NUMBER,
@@ -43,6 +33,17 @@ BUILTIN_RETURNS = {
 }
 
 
+ANNOTATION_TO_TYPE = {
+    "num":   TYPE_NUMBER,
+    "str":   TYPE_STRING,
+    "bool":  TYPE_BOOL,
+    "array": TYPE_ARRAY,
+    "map":   TYPE_MAP,
+    "any":   TYPE_ANY,
+    "void":  TYPE_ANY,
+}
+
+
 class TypeCheckError(Exception):
     def __init__(self, message: str, line: int, col: int):
         super().__init__(f"[{line}:{col}] type error: {message}")
@@ -64,8 +65,6 @@ class TypeChecker:
         for stmt in program.stmts:
             self.check_stmt(stmt)
 
-    # ---------- scopes ----------
-
     def _push(self) -> None:
         self.scopes.append({})
 
@@ -80,8 +79,6 @@ class TypeChecker:
 
     def _define(self, name: str, t: str) -> None:
         self.scopes[-1][name] = t
-
-    # ---------- statements ----------
 
     def check_stmt(self, stmt: ast.Stmt) -> None:
         match stmt:
@@ -240,8 +237,6 @@ class TypeChecker:
                 scope[name] = TYPE_ANY
                 return
 
-    # ---------- expressions ----------
-
     def infer(self, expr: ast.Expr) -> str:
         match expr:
             case ast.NumberLit():
@@ -257,24 +252,11 @@ class TypeChecker:
                         f"undefined variable '{name}'", line, col
                     )
                 return t
-            case ast.FnExpr(params, ret, body, line, col):
-                ret_t = ANNOTATION_TO_TYPE.get(ret, TYPE_ANY)
-                self.fn_returns.append(ret_t)
-                self._push()
-                try:
-                    for p in params:
-                        self._define(p, TYPE_ANY)
-                    saved_loop = self.loop_depth
-                    self.loop_depth = 0
-                    try:
-                        for s in body.stmts:
-                            self.check_stmt(s)
-                    finally:
-                        self.loop_depth = saved_loop
-                finally:
-                    self._pop()
-                    self.fn_returns.pop()
-                return TYPE_FUNCTION
+            case ast.InterpolatedString(parts, line, col):
+                for p in parts:
+                    if not isinstance(p, str):
+                        self.infer(p)
+                return TYPE_STRING
             case ast.ArrayLit():
                 for e in expr.elems:
                     self.infer(e)

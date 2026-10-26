@@ -4,6 +4,7 @@
   "description": "Syntax highlighting and language support for Donky",
   "version": "0.2.0",
   "publisher": "Earl Donkey",
+  "icon": "icons/donky-extension.png",
   "engines": { "vscode": "^1.75.0" },
   "categories": ["Programming Languages"],
   "main": "./out/extension.js",
@@ -27,7 +28,11 @@
         "id": "donky",
         "aliases": ["Donky", "donky"],
         "extensions": [".donk"],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "icons/donky-file.png",
+          "dark": "icons/donky-file.png"
+        }
       }
     ],
     "grammars": [

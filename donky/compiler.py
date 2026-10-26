@@ -152,7 +152,6 @@ class Compiler:
 
     def _compile_closure_expr(self, name: str, params: list[str],
                                body: ast.Block) -> None:
-        """Compile a function body into a CLOSURE and leave it on the stack."""
         fn_code = self._compile_function(name, params, body)
         fn_idx = len(self.code.functions)
         self.code.functions.append(fn_code)
@@ -162,6 +161,14 @@ class Compiler:
             else:
                 self._emit(Op.CAPTURE_UPVALUE, uv.index)
         self._emit(Op.CLOSURE, fn_idx, len(fn_code.upvalues))
+
+    def _compile_interp_part(self, part):
+        if isinstance(part, str):
+            self._emit(Op.CONST, self.code.constant_index(part))
+        else:
+            self._emit(Op.LOAD_GLOBAL, "str")
+            self.compile_expr(part)
+            self._emit(Op.CALL, 1, "str")
 
     def compile_stmt(self, stmt: ast.Stmt) -> None:
         line = getattr(stmt, "line", 0)
@@ -385,6 +392,14 @@ class Compiler:
                 self._load_name(n)
             case ast.FnExpr(params, ret, body, line, col):
                 self._compile_closure_expr("<anonymous>", params, body)
+            case ast.InterpolatedString(parts, line, col):
+                if not parts:
+                    self._emit(Op.CONST, self.code.constant_index(""))
+                else:
+                    self._compile_interp_part(parts[0])
+                    for p in parts[1:]:
+                        self._compile_interp_part(p)
+                        self._emit(Op.ADD)
             case ast.Unary("-", operand, line, col):
                 self.compile_expr(operand)
                 self._emit(Op.NEG)

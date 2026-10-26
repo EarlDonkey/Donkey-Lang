@@ -1,0 +1,10 @@
+{
+  "iconDefinitions": {
+    "_donky_file": {
+      "iconPath": "./icons/donky-file.png"
+    }
+  },
+  "fileExtensions": {
+    "donk": "_donky_file"
+  }
+}
