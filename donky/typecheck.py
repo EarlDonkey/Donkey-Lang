@@ -80,6 +80,13 @@ class TypeChecker:
         for name, ret in BUILTIN_RETURNS.items():
             self.scopes[0][name] = TYPE_FUNCTION
         self.scopes[0]["args"] = TYPE_ARRAY
+        
+        # --- Pre-pass: Register all global functions for mutual recursion ---
+        for stmt in program.stmts:
+            if isinstance(stmt, ast.FnStmt):
+                self.fn_arities[stmt.name] = len(stmt.params)
+                self.scopes[0][stmt.name] = TYPE_FUNCTION
+
         for stmt in program.stmts:
             self.check_stmt(stmt)
 
@@ -260,6 +267,12 @@ class TypeChecker:
     def check_block(self, block: ast.Block) -> None:
         self._push()
         try:
+            # --- Pre-pass: Register all local functions ---
+            for stmt in block.stmts:
+                if isinstance(stmt, ast.FnStmt):
+                    self.fn_arities[stmt.name] = len(stmt.params)
+                    self.scopes[-1][stmt.name] = TYPE_FUNCTION
+
             for stmt in block.stmts:
                 self.check_stmt(stmt)
         finally:
