@@ -1,1321 +1,531 @@
-# Donky
+# The Donky Programming Language Reference Manual
 
-**A small programming language you can learn in an afternoon, and use to write real programs.**
-
-Donky is a programming language. You write instructions in a `.donk` file, run them with the Donky interpreter, and the computer does what you said.
-
-It's small on purpose. There aren't many features, so the whole language fits in your head. Once you've read this guide, you'll know all of it.
-
----
-
-## Table of contents
-
-1. [What is a programming language?](#1-what-is-a-programming-language)
-2. [Getting started](#2-getting-started)
-3. [Your first program](#3-your-first-program)
-4. [Variables and numbers](#4-variables-and-numbers)
-5. [Strings — working with text](#5-strings--working-with-text)
-6. [Making decisions: if / else](#6-making-decisions-if--else)
-7. [Repeating things: while and for](#7-repeating-things-while-and-for)
-8. [Lists (arrays)](#8-lists-arrays)
-9. [Dictionaries (maps)](#9-dictionaries-maps)
-10. [Functions — reusable code](#10-functions--reusable-code)
-11. [When things go wrong: try / catch](#11-when-things-go-wrong-try--catch)
-12. [Talking to the user: input](#12-talking-to-the-user-input)
-13. [Files](#13-files)
-14. [Splitting your code into files: import](#14-splitting-your-code-into-files-import)
-15. [A complete program: a notes app](#15-a-complete-program-a-notes-app)
-16. [Cheat sheet](#16-cheat-sheet)
-17. [Troubleshooting](#17-troubleshooting)
+**Version:** 1.0.0
+**Author:** EarlDonkey
+**Repository:** https://github.com/EarlDonkey/Donky-Lang
+**License:** MIT
 
 ---
 
-## 1. What is a programming language?
+## Table of Contents
 
-A programming language is a way to give a computer instructions. You write those instructions in a text file, save it with a `.donk` extension, and run it. The computer reads your instructions top to bottom, does what they say, and stops.
-
-Here's the smallest program in Donky:
-
-```donky
-print("Hello, world!");
-```
-
-`print` means "show this on the screen." The text in quotes is what gets shown. The `;` at the end is a period — it tells Donky the instruction is finished. Save this as `hello.donk`, run it, and you'll see:
-
-```
-Hello, world!
-```
-
-That's it. You've written a program.
-
----
-
-## 2. Getting started
-
-### If you have the .exe
-
-Download `donky.exe` (or the `donky/` folder that contains it). Open a terminal in that folder. Run:
-
-```
-donky hello.donk
-```
-
-### If you have the source
-
-You need Python 3.10 or newer. Then:
-
-```
-python -m donky.run hello.donk
-```
-
-Or, to try code without writing a file first, start the interactive prompt:
-
-```
-python -m donky
-```
-
-You'll get a `donky>` prompt. Type `1 + 2` and press Enter. It prints `3`. Type `:quit` to leave.
-
-### Three ways to run
-
-- `donky myfile.donk` — run a program.
-- `donky` (no file) — start the REPL (a live prompt).
-- `donky --check-only myfile.donk` — just check for errors, don't run.
+1. [Introduction](#1-introduction)
+2. [Installation and Tooling](#2-installation-and-tooling)
+3. [Lexical Structure](#3-lexical-structure)
+4. [Variables and Types](#4-variables-and-types)
+5. [Operators](#5-operators)
+6. [Control Flow](#6-control-flow)
+7. [Functions and Closures](#7-functions-and-closures)
+8. [Data Structures](#8-data-structures)
+9. [Error Handling](#9-error-handling)
+10. [Modules and the Package Manager](#10-modules-and-the-package-manager)
+11. [Standard Library Reference](#11-standard-library-reference)
+12. [Networking and Concurrency](#12-networking-and-concurrency)
+13. [The Bytecode Compiler and VM](#13-the-bytecode-compiler-and-vm)
+14. [The Self-Hosted Compiler](#14-the-self-hosted-compiler)
+15. [Appendix A: EBNF Grammar](#15-appendix-a-ebnf-grammar)
+16. [Appendix B: Opcode Reference](#16-appendix-b-opcode-reference)
+17. [Appendix C: Architecture and Internals](#17-appendix-c-architecture-and-internals)
+18. [Appendix D: Known Limitations](#18-appendix-d-known-limitations)
 
 ---
 
-## 3. Your first program
+## 1. Introduction
 
-Save this as `hello.donk`:
+Donky is a small, dynamic, general-purpose programming language designed to be easily embedded, extended, and understood. It was built entirely from scratch, featuring a custom lexer, a Pratt parser, a static type checker, a tree-walking interpreter, a stack-based bytecode virtual machine, and a self-hosted compiler.
 
-```donky
-print("Hello, world!");
-print("My name is Donky.");
-print(2 + 2);
-```
+### 1.1 Philosophy
+- **Explicit over Implicit:** There is no truthy/falsy coercion. `if` conditions must strictly evaluate to `bool`.
+- **Network First:** TCP, HTTP, and WebSocket primitives are baked directly into the standard library.
+- **Tooling is Part of the Language:** Donky is not complete without its REPL, its package manager, and its Language Server Protocol (LSP) implementation for VS Code.
+- **Self-Hosting:** The language is capable of compiling and interpreting itself.
 
-Run it. You'll see:
-
-```
-Hello, world!
-My name is Donky.
-4
-```
-
-Three `print` instructions. Notice that `print` can show text (`"Hello, world!"`) or the answer to a math problem (`2 + 2`). It shows whatever you give it.
-
-**One rule to remember:** every instruction ends with `;`. Forget it and Donky will complain.
+### 1.2 Architecture Overview
+When you execute `donky main.donk`, the following pipeline occurs:
+1. **Lexer:** Scans the source file and produces a list of `Token` objects.
+2. **Parser:** Consumes tokens and builds an Abstract Syntax Tree (AST).
+3. **Module Expander:** Recursively resolves `import` statements and merges ASTs.
+4. **Type Checker:** Walks the AST to enforce types, check variable definitions, and verify function arities.
+5. **Execution:** The AST is handed to either the Tree-Walking Interpreter or the Bytecode Compiler + VM.
 
 ---
 
-## 4. Variables and numbers
+## 2. Installation and Tooling
 
-A **variable** is a name for a value. You create one with `let`.
+### 2.1 Installation
+Donky provides a Windows Installer and a portable ZIP.
+- **Installer (`Donky-v1.0.0-Setup.exe`):** Installs to `Program Files`, adds `donky` to the system PATH, and associates `.donk` files.
+- **Portable (`Donky-v1.0.0-Windows.zip`):** Extract anywhere. No PATH modifications.
 
-```donky
-let age = 10;
-print(age);
+### 2.2 The CLI Commands
+- `donky <file.donk>`: Executes the file using the tree-walking interpreter.
+- `donky --bytecode <file.donk>`: Executes the file by compiling to bytecode first.
+- `donky --check-only <file.donk>`: Runs the parser and type checker but does not execute.
+- `donky install`: Runs the package manager.
+- `donky`: Opens the interactive Read-Eval-Print Loop (REPL).
 
-let price = 4.99;
-print(price);
-
-let total = age + price;
-print(total);
+### 2.3 The REPL
+The REPL maintains a persistent environment.
+```text
+donky> let x = 10;
+donky> x + 5
+15
+donky> fn greet() { print("hi"); }
+donky> greet()
+hi
+donky> :quit
 ```
-
-Prints:
-
-```
-10
-4.99
-14.99
-```
-
-### Math
-
-Donky understands the usual math:
-
-```donky
-print(2 + 3);    // 5 — addition
-print(10 - 4);   // 6 — subtraction
-print(3 * 4);    // 12 — multiplication
-print(10 / 4);   // 2.5 — division (always gives a decimal)
-print(10 div 4); // 2 — integer division (throws away the remainder)
-print(10 % 4);   // 2 — remainder
-```
-
-**`div` vs `/`**: `/` gives you a decimal answer. `div` throws away the decimal part. Use `/` for measuring things (2.5 liters), `div` for counting things (how many whole groups of 4 fit in 10).
-
-### Two kinds of numbers
-
-- `42` — a whole number (integer)
-- `3.14` — a decimal number (float)
-
-Donky handles both. You don't have to think about which is which most of the time.
-
-### Changing a variable
-
-```donky
-let score = 0;
-print(score);     // 0
-score = score + 10;
-print(score);     // 10
-score = score + 5;
-print(score);     // 15
-```
-
-The `=` here is **assignment** — "make the variable hold this value now." It's not testing whether the two sides are equal. (Testing equality is `==`, two equals signs.)
-
-### Try it
-
-Change the program to compute your age in days. (Multiply by 365.)
 
 ---
 
-## 5. Strings — working with text
+## 3. Lexical Structure
 
-A **string** is text inside quotes. `"hello"` is a string. So is `"Good morning, Mr. Smith!"`.
-
-### Joining strings
-
-Use `+`:
-
+### 3.1 Comments
+Comments start with `//` and extend to the end of the line.
 ```donky
-let first = "Ada";
-let last = "Lovelace";
-let full = first + " " + last;
-print(full);  // Ada Lovelace
+// This is a comment
+let x = 10; // This is inline
 ```
 
-### Length
-
+### 3.2 Identifiers
+Identifiers start with a letter or underscore `_`, and contain letters, numbers, and underscores.
 ```donky
-let s = "hello";
-print(len(s));   // 5
+let valid_name = 1;
+let _internal = 2;
 ```
 
-### Getting one character
+### 3.3 Keywords
+The following words are reserved:
+`let`, `fn`, `if`, `else`, `while`, `for`, `in`, `return`, `print`, `true`, `false`, `div`, `break`, `continue`, `try`, `catch`, `throw`, `import`, `struct`.
 
-Put the position (starting at 0) in square brackets:
+### 3.4 Literals
+- **Integers:** `42`, `-7`
+- **Floats:** `3.14`, `-0.5`
+- **Strings:** `"hello"`, `"line\nbreak"`, `"interpolated ${x}"`
+- **Booleans:** `true`, `false`
+- **Arrays:** `[1, 2, 3]`, `[]`
+- **Maps:** `{ "key": "value" }`, `{}`
 
+### 3.5 String Interpolation
+Strings can contain `${expression}`. The expression is evaluated and concatenated.
 ```donky
-let s = "hello";
-print(s[0]);   // h
-print(s[1]);   // e
-print(s[4]);   // o
+let name = "Alice";
+print("Hello, ${name}!");
 ```
-
-Positions start at **zero**, not one. `s[0]` is the first character. If you ask for `s[5]` on a 5-character string, Donky will complain — positions go from 0 to 4.
-
-### Changing case, trimming, splitting
-
-```donky
-print(upper("hello"));        // HELLO
-print(lower("HELLO"));        // hello
-print(trim("  hi  "));        // "hi" (whitespace removed from the ends)
-print(replace("a-b-c", "-", "+"));  // a+b+c
-
-// Split into pieces:
-let parts = split("apple,banana,cherry", ",");
-print(parts);        // [apple, banana, cherry]
-print(len(parts));   // 3
-
-// Join pieces back together:
-print(join(parts, " | "));  // apple | banana | cherry
-```
-
-### Checking if text contains something
-
-```donky
-print(contains("hello world", "world"));  // true
-print(contains("hello world", "xyz"));    // false
-```
-
-### Loop over the characters
-
-```donky
-let s = "abc";
-for c in s {
-    print(c);
-}
-```
-
-Prints:
-
-```
-a
-b
-c
-```
-
-### Comparing strings
-
-```donky
-print("apple" == "apple");   // true
-print("apple" != "banana");  // true
-print("apple" < "banana");   // true (alphabetical)
-```
-
-### Try it
-
-Write a program that takes your name and prints "Hello, [name]!" — but in ALL CAPS. (Use `upper`.)
 
 ---
 
-## 6. Making decisions: if / else
+## 4. Variables and Types
 
-An `if` statement runs some code only when a condition is true.
-
+### 4.1 Variable Declaration
+Variables are created with `let`.
 ```donky
-let age = 15;
-
-if age >= 18 {
-    print("You can vote.");
-} else {
-    print("Not yet.");
-}
+let x = 10;
+let name = "Bob";
 ```
 
-Prints:
-
-```
-Not yet.
-```
-
-`>=` means "greater than or equal to." Here's the full family:
-
-- `==` — equal to
-- `!=` — not equal to
-- `<` — less than
-- `<=` — less than or equal to
-- `>` — greater than
-- `>=` — greater than or equal to
-
-### Multiple conditions
-
-Chain `else if` to test several things:
-
+### 4.2 Assignment
+Variables can be reassigned using `=`. Reassignment changes the type if necessary.
 ```donky
-let score = 87;
-
-if score >= 90 {
-    print("A");
-} else if score >= 80 {
-    print("B");
-} else if score >= 70 {
-    print("C");
-} else {
-    print("F");
-}
+let x = 10;
+x = "Now a string";
 ```
 
-Prints:
-
-```
-B
-```
-
-Donky checks top to bottom. The first true one wins. **Important:** only one block runs.
-
-### And / or / not
-
-```donky
-let age = 15;
-let has_id = true;
-
-if age >= 18 && has_id {      // AND: both must be true
-    print("You can enter.");
-}
-
-if age < 18 || !has_id {      // OR (either), NOT (reverse)
-    print("Stop.");
-}
-```
-
-`&&` means **and**. `||` means **or**. `!` means **not**. `!has_id` is true when `has_id` is false.
-
-### Try it
-
-Write a program that reads a number and prints "positive", "negative", or "zero".
-
----
-
-## 7. Repeating things: while and for
-
-### `while` — repeat while something is true
-
-```donky
-let countdown = 3;
-
-while countdown > 0 {
-    print(countdown);
-    countdown = countdown - 1;
-}
-print("Liftoff!");
-```
-
-Prints:
-
-```
-3
-2
-1
-Liftoff!
-```
-
-A `while` loop checks its condition before each pass. When the condition becomes false, it stops. **Beware:** if the condition never becomes false, the loop never ends. Always make sure the body changes something that affects the condition.
-
-### `for` — loop over a list
-
-The most useful loop. It walks through each item of a list, string, or map:
-
-```donky
-for fruit in ["apple", "banana", "cherry"] {
-    print(fruit);
-}
-```
-
-Prints:
-
-```
-apple
-banana
-cherry
-```
-
-You don't have to count anything. `for` handles it. This is why `for` is nicer than `while` most of the time.
-
-### Stopping early: `break`
-
-```donky
-for n in [1, 2, 3, 4, 5] {
-    if n == 3 {
-        break;
-    }
-    print(n);
-}
-```
-
-Prints:
-
-```
-1
-2
-```
-
-`break` jumps out of the loop immediately, ignoring the rest.
-
-### Skipping one: `continue`
-
-```donky
-for n in [1, 2, 3, 4, 5] {
-    if n % 2 == 0 {
-        continue;
-    }
-    print(n);
-}
-```
-
-Prints:
-
-```
-1
-3
-5
-```
-
-`continue` says "skip the rest of this pass, go to the next one." So even numbers get skipped.
-
-### Try it
-
-Write a program that prints the numbers 1 through 100, but replaces multiples of 3 with "Fizz", multiples of 5 with "Buzz", and multiples of both with "FizzBuzz." (This is the classic FizzBuzz puzzle.)
-
----
-
-## 8. Lists (arrays)
-
-An **array** is a list of values in order, written with square brackets.
-
-```donky
-let colors = ["red", "green", "blue"];
-print(colors);       // [red, green, blue]
-print(len(colors));  // 3
-print(colors[0]);    // red
-print(colors[2]);    // blue
-```
-
-Same as with strings, positions start at 0. `colors[0]` is the first item.
-
-### Changing an item
-
-```donky
-let nums = [10, 20, 30];
-nums[1] = 99;
-print(nums);   // [10, 99, 30]
-```
-
-### Adding and removing
-
-```donky
-let a = [1, 2, 3];
-
-push(a, 4);      // add to the end
-print(a);        // [1, 2, 3, 4]
-
-let last = pop(a);   // remove and return the last item
-print(last);         // 4
-print(a);            // [1, 2, 3]
-```
-
-### Looping over a list
-
-```donky
-let scores = [90, 85, 92, 88];
-
-for s in scores {
-    print(s);
-}
-
-// Compute the total:
-let total = 0;
-for s in scores {
-    total = total + s;
-}
-print(total);              // 355
-print(total / len(scores)); // 88.75
-```
-
-### Sorting
-
-```donky
-let nums = [3, 1, 4, 1, 5, 9, 2, 6];
-sort(nums);
-print(nums);   // [1, 1, 2, 3, 4, 5, 6, 9]
-
-let words = ["charlie", "alice", "bob"];
-sort(words);
-print(words);   // [alice, bob, charlie]
-```
-
-`sort` puts things in ascending order — numbers from small to large, strings alphabetically. **Important:** `sort` modifies the array in place. It doesn't return a new one.
-
-You can't sort a mixed-type array like `[1, "two"]`. All elements have to be the same kind.
-
-### Try it
-
-Write a program that stores ten of your favorite numbers in a list, sorts them, and prints the smallest and largest.
-
----
-
-## 9. Dictionaries (maps)
-
-A **map** (sometimes called a dictionary) stores values under labels, called **keys**. You write it with curly braces:
-
-```donky
-let ages = {"alice": 30, "bob": 25, "carol": 40};
-print(ages["alice"]);   // 30
-print(ages["carol"]);   // 40
-```
-
-The key (`"alice"`) looks up the value (`30`). This is useful when you want to look things up by name, not by position.
-
-### Adding and updating
-
-```donky
-let ages = {};
-ages["dave"] = 22;
-ages["eve"]  = 28;
-print(ages);   // {dave: 22, eve: 28}
-
-ages["dave"] = 23;   // overwrite
-print(ages["dave"]); // 23
-```
-
-### Checking if a key exists
-
-```donky
-let ages = {"alice": 30};
-print(contains(ages, "alice"));   // true
-print(contains(ages, "bob"));     // false
-```
-
-**Danger:** if you ask for a key that doesn't exist, Donky will crash. Check `contains` first if you're not sure:
-
-```donky
-if contains(ages, "bob") {
-    print(ages["bob"]);
-} else {
-    print("no age for bob");
-}
-```
-
-### Getting all the keys
-
-```donky
-let ages = {"alice": 30, "bob": 25};
-print(keys(ages));     // [alice, bob]
-print(len(ages));      // 2
-```
-
-### Looping over a map
-
-`for` over a map gives you each key:
-
-```donky
-let scores = {"math": 92, "science": 88, "english": 95};
-
-for subject in scores {
-    print(subject + ": " + str(scores[subject]));
-}
-```
-
-Prints:
-
-```
-math: 92
-science: 88
-english: 95
-```
-
-### A real use: counting
-
-```donky
-let words = ["apple", "banana", "apple", "cherry", "banana", "apple"];
-let counts = {};
-
-for w in words {
-    if contains(counts, w) {
-        counts[w] = counts[w] + 1;
-    } else {
-        counts[w] = 1;
-    }
-}
-
-print(counts);   // {apple: 3, banana: 2, cherry: 1}
-```
-
-That pattern — check if the key exists, increment or set to 1 — is used constantly. Remember it.
-
-### Try it
-
-Write a program that reads a sentence, splits it into words with `split(sentence, " ")`, and counts how many times each word appears.
-
----
-
-## 10. Functions — reusable code
-
-A **function** is a named chunk of code you can call whenever you want. It can take **arguments** (inputs) and give back a **return value** (output).
-
+### 4.3 Type System
+Donky features dynamic typing at runtime but a static type checker at compile time.
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `number` | Integers and Floats | `42`, `3.14` |
+| `string` | UTF-8 text | `"Hello"` |
+| `bool` | True/False | `true` |
+| `array` | Mutable list | `[1, 2, 3]` |
+| `map` | Key-value store | `{"a": 1}` |
+| `function` | First-class callable | `fn(x) { ... }` |
+| `struct` | Named record | `Point { x: 10 }` |
+
+### 4.4 Type Annotations
+Functions can declare return types. The type checker enforces these.
 ```donky
 fn add(a, b) -> num {
     return a + b;
 }
+```
+Valid annotations: `num`, `str`, `bool`, `array`, `map`, `any`, `void`.
 
-print(add(2, 3));   // 5
-print(add(10, 20)); // 30
+---
+
+## 5. Operators
+
+### 5.1 Arithmetic
+| Operator | Description |
+|----------|-------------|
+| `+` | Addition or String Concatenation |
+| `-` | Subtraction |
+| `*` | Multiplication |
+| `/` | Division (always returns a float) |
+| `div` | Integer division (truncates towards zero) |
+| `%` | Modulo (remainder) |
+
+### 5.2 Comparison
+`==`, `!=`, `<`, `<=`, `>`, `>=`
+
+### 5.3 Logical
+`&&` (AND), `||` (OR), `!` (NOT)
+*Logical operators short-circuit and require boolean operands.*
+
+### 5.4 Precedence
+Lowest to Highest:
+1. `||`
+2. `&&`
+3. `==` `!=`
+4. `<` `<=` `>` `>=`
+5. `+` `-`
+6. `*` `/` `%` `div`
+7. Unary `-` `!`
+8. Postfix `.` `[]`
+
+---
+
+## 6. Control Flow
+
+### 6.1 If / Else
+```donky
+if x > 10 {
+    print("Big");
+} else if x > 5 {
+    print("Medium");
+} else {
+    print("Small");
+}
+```
+Donky requires conditions to be `bool`. `if 1` is an error.
+
+### 6.2 While Loops
+```donky
+let i = 0;
+while i < 5 {
+    print(i);
+    i = i + 1;
+}
 ```
 
-Let's break it down:
+### 6.3 For Loops
+For loops iterate over arrays, strings, and maps.
+```donky
+// Arrays
+for item in [1, 2, 3] { print(item); }
 
-- `fn add(a, b)` — define a function named `add`, taking two arguments called `a` and `b`.
-- `-> num` — it will return a number.
-- `{ return a + b; }` — the body. `return` gives a value back to whoever called it.
+// Strings
+for char in "hello" { print(char); }
 
-### No return value
+// Maps (iterates over keys)
+for key in {"a": 1, "b": 2} { print(key); }
+```
 
-If a function doesn't need to give anything back, say `-> void`:
+### 6.4 Break and Continue
+```donky
+for i in [1, 2, 3, 4] {
+    if i == 2 { continue; }
+    if i == 4 { break; }
+    print(i);
+}
+```
 
+---
+
+## 7. Functions and Closures
+
+### 7.1 Declarations
 ```donky
 fn greet(name) -> void {
-    print("Hello, " + name + "!");
-}
-
-greet("Ada");   // Hello, Ada!
-```
-
-### Different return types
-
-```donky
-fn is_even(n) -> bool {
-    return n % 2 == 0;
-}
-
-fn shout(s) -> str {
-    return upper(s) + "!";
-}
-
-fn sum(arr) -> num {
-    let total = 0;
-    for x in arr {
-        total = total + x;
-    }
-    return total;
-}
-```
-
-### Recursion — a function that calls itself
-
-```donky
-fn factorial(n) -> num {
-    if n < 2 {
-        return 1;
-    }
-    return n * factorial(n - 1);
-}
-
-print(factorial(5));   // 120 (5 × 4 × 3 × 2 × 1)
-```
-
-This is one of the most powerful ideas in programming. A function that calls itself, with a `if` that says when to stop, can solve things that would be painful to write as loops.
-
-### Try it
-
-Write a function `is_palindrome(s) -> bool` that returns true if the string reads the same forward and backward. ("racecar" → true, "hello" → false.)
-
----
-
-## 11. When things go wrong: try / catch
-
-Sometimes a program does something impossible — divides by zero, reads a file that isn't there. Normally that crashes the program. `try` / `catch` lets you handle it gracefully.
-
-```donky
-try {
-    let x = 10 / 0;
-    print("This never runs.");
-} catch e {
-    print("Something went wrong: " + e);
-}
-```
-
-Prints:
-
-```
-Something went wrong: division by zero
-```
-
-The `try` block runs normally. If anything inside it fails, execution jumps to the `catch` block, with `e` set to the error message.
-
-### Throwing your own errors
-
-You can raise errors on purpose with `throw`:
-
-```donky
-fn divide(a, b) -> num {
-    if b == 0 {
-        throw "cannot divide by zero";
-    }
-    return a / b;
-}
-
-try {
-    print(divide(10, 2));
-    print(divide(5, 0));
-} catch e {
-    print("oops: " + e);
-}
-```
-
-Prints:
-
-```
-5.0
-oops: cannot divide by zero
-```
-
-### Reading a file that might not exist
-
-```donky
-if file_exists("data.txt") {
-    let text = read_file("data.txt");
-    print(text);
-} else {
-    print("No data file yet.");
-}
-```
-
-`file_exists` is the safest check. You can also use `try` / `catch` on `read_file` directly:
-
-```donky
-try {
-    let text = read_file("data.txt");
-    print(text);
-} catch e {
-    print("Couldn't read the file.");
-}
-```
-
-### Try it
-
-Write a program that asks for two numbers and divides them. If the user enters zero for the second number, print a friendly message instead of crashing.
-
----
-
-## 12. Talking to the user: input
-
-`input("prompt")` pauses the program, shows the prompt, and waits for the user to type something and press Enter. Whatever they type comes back as a **string**.
-
-```donky
-let name = input("What's your name? ");
-print("Hello, " + name + "!");
-```
-
-```
-What's your name? Ada
-Hello, Ada!
-```
-
-### Reading numbers
-
-`input` always gives you a string, even if the user typed `42`. To turn the string into a number, use `num`:
-
-```donky
-let age_str = input("How old are you? ");
-let age = num(age_str);
-print("Next year you'll be " + str(age + 1));
-```
-
-### A complete guessing game
-
-```donky
-let secret = 42;
-let guess = 0;
-
-while guess != secret {
-    guess = num(input("Guess a number: "));
-    if guess < secret {
-        print("Too low!");
-    } else if guess > secret {
-        print("Too high!");
-    }
-}
-print("You got it!");
-```
-
-This is the pattern every interactive program uses: prompt, read, decide, repeat.
-
-### Try it
-
-Change the game so the secret number is random. (Donky doesn't have a random builtin yet — ask the user to think of the number, then have the computer guess by narrowing the range with too high / too low responses.)
-
----
-
-## 13. Files
-
-### Reading
-
-```donky
-let text = read_file("myfile.txt");
-print(text);
-```
-
-`read_file` reads the whole file into a string. If the file doesn't exist, it crashes — so check first with `file_exists`, or wrap in try/catch.
-
-### Writing
-
-```donky
-write_file("output.txt", "Hello, file!\n");
-```
-
-This **overwrites** the file. If it didn't exist, it creates it. If it did, it replaces its contents.
-
-### Existence check
-
-```donky
-if file_exists("data.txt") {
-    print("File exists!");
-} else {
-    print("No file.");
-}
-```
-
-### Working with lines
-
-```donky
-let text = read_file("poem.txt");
-let lines = split(text, "\n");
-
-for line in lines {
-    print("> " + line);
-}
-```
-
-Note `"\n"` — that's a **newline character**. In a string, `\n` means "go to a new line." So `split(text, "\n")` splits on newlines, giving you an array of lines.
-
-### Path gotcha on Windows
-
-Use **forward slashes** in file paths, like `"C:/Users/Ada/data.txt"`. Backslashes are special in Donky strings (they start escape sequences like `\n`).
-
-### Try it
-
-Write a program that appends a new line to a file each time it runs. (Hint: read the file if it exists, add your line, write it back.)
-
----
-
-## 14. Standard library
-
-Donky ships with five modules of helpers, written in Donky itself. You import them the same way as any file — the path is `lib/` at the repo root.
-
-```donky
-import "lib/list.donk";
-import "lib/format.donk";
-```
-
-### `lib/list.donk` — working with arrays
-
-Higher-order helpers. All take a function as an argument. You write those functions with `fn(...) { ... }` — anonymous functions, defined right in the call.
-
-| Function | What it does |
-|---|---|
-| `map(arr, f)` | Apply `f` to each element, return a new array |
-| `filter(arr, f)` | Keep elements where `f` returns true |
-| `reduce(arr, f, init)` | Fold the array into one value |
-| `sort_by(arr, f)` | Sort ascending by the result of `f`; stable, non-mutating |
-| `reverse(arr)` | New array, reversed |
-| `unique(arr)` | New array, duplicates removed, order preserved |
-| `any(arr, f)` | True if any element satisfies `f` |
-| `all(arr, f)` | True if every element satisfies `f` |
-| `count(arr, f)` | How many elements satisfy `f` |
-
-```donky
-import "lib/list.donk";
-
-let nums = [1, 2, 3, 4, 5];
-
-print(map(nums, fn(x) -> num { return x * x; }));       // [1, 4, 9, 16, 25]
-print(filter(nums, fn(x) -> bool { return x % 2 == 0; })); // [2, 4]
-print(reduce(nums, fn(a, b) -> num { return a + b; }, 0)); // 15
-print(reverse(nums));                                     // [5, 4, 3, 2, 1]
-print(unique([1, 2, 1, 3, 2]));                           // [1, 2, 3]
-```
-
-**Trick:** `sort_by` returns ascending. For descending, negate a numeric key:
-```donky
-sort_by(items, fn(x) -> num { return -x.score; })
-```
-
-### `lib/format.donk` — formatting output
-
-| Function | What it does |
-|---|---|
-| `format_num(x, places)` | Number → string with `places` decimals (truncates) |
-| `repeat(s, n)` | String `s` repeated `n` times |
-| `pad_left(s, width, ch)` | Pad `s` on the left with `ch` until `width` wide |
-| `pad_right(s, width, ch)` | Pad on the right |
-
-```donky
-import "lib/format.donk";
-
-print(format_num(10 / 3, 2));       // "3.33"
-print(format_num(-0.5, 3));         // "-0.500"
-print(pad_left("42", 5, " "));      // "   42"
-print(pad_left("42", 5, "0"));      // "00042"
-print(repeat("=", 10));             // "=========="
-```
-
-**Note:** `format_num` truncates rather than rounds. `format_num(3.999, 2)` gives `"3.99"`. If you need rounding, that's a future feature.
-
-### `lib/strings.donk` — string helpers
-
-| Function | What it does |
-|---|---|
-| `starts_with(s, prefix)` | True if `s` begins with `prefix` |
-| `ends_with(s, suffix)` | True if `s` ends with `suffix` |
-| `slice(s, start, end)` | Substring from `start` (inclusive) to `end` (exclusive) |
-| `index_of(s, needle)` | Position of first `needle` in `s`, or -1 |
-
-```donky
-import "lib/strings.donk";
-
-print(starts_with("hello", "he"));  // true
-print(ends_with("hello", "lo"));    // true
-print(slice("hello", 1, 4));        // "ell"
-print(index_of("hello", "ll"));     // 2
-print(index_of("hello", "zz"));     // -1
-```
-
-### `lib/csv.donk` — reading and writing CSV
-
-| Function | What it does |
-|---|---|
-| `parse_line(line)` | Split one CSV line into an array of strings |
-| `format_line(fields)` | Join an array of strings into a CSV line |
-| `parse_table(text)` | Parse a whole CSV file body into an array of rows |
-| `format_table(rows)` | Format an array of rows back into a CSV body |
-
-```donky
-import "lib/csv.donk";
-
-let rows = parse_table(read_file("data.csv"));
-for row in rows {
-    print(row[0] + " has " + row[1] + " items");
-}
-```
-
-**Limitation:** no quoted fields in v1. Values containing commas will be split incorrectly.
-
-### `lib/math.donk` — numeric helpers
-
-| Function | What it does |
-|---|---|
-| `min(a, b)` | The smaller of two numbers |
-| `max(a, b)` | The larger |
-| `abs(n)` | Absolute value |
-| `pow(base, exp)` | Integer exponent (base^exp) |
-| `sqrt(n)` | Square root (Newton's method); throws on negative |
-
-```donky
-import "lib/math.donk";
-
-print(min(3, 7));       // 3
-print(abs(-5));         // 5
-print(pow(2, 10));      // 1024
-print(sqrt(16));        // 4.0
-```
-
-### Combining modules
-
-A real program often imports several:
-
-```donky
-import "lib/list.donk";
-import "lib/format.donk";
-
-let scores = [72, 95, 88, 60, 91];
-let sorted = reverse(sort_by(scores, fn(x) -> num { return x; }));
-for s in sorted {
-    print(pad_left(str(s), 4, " "));
-}
-// Output:
-//   95
-//   91
-//   88
-//   72
-//   60
-```
-
-### Writing your own library
-
-Any `.donk` file can be imported. Put reusable functions in `lib/` (or anywhere), import from your program:
-
-`lib/mystuff.donk`:
-```donky
-fn greet(name) -> str {
-    return "Hello, " + name + "!";
-}
-```
-
-`main.donk`:
-```donky
-import "lib/mystuff.donk";
-print(greet("Ada"));   // Hello, Ada!
-```
-
-**Rules:** `import` must be at the top level. Paths are relative to the importing file. The same file imported twice is only loaded once. Give your functions unique names — there's no namespace isolation yet.
-
-## 15. Splitting your code into files: import
-
-When a program gets big, put helper functions in a separate file and import it.
-
-Save `lib/math.donk`:
-
-```donky
-fn double(n) -> num {
-    return n * 2;
-}
-
-fn square(n) -> num {
-    return n * n;
-}
-
-fn clamp(n, lo, hi) -> num {
-    if n < lo { return lo; }
-    if n > hi { return hi; }
-    return n;
-}
-```
-
-Save `use_math.donk`:
-
-```donky
-import "lib/math.donk";
-
-print(double(5));       // 10
-print(square(3));       // 9
-print(clamp(15, 0, 10)); // 10
-```
-
-Run `donky use_math.donk`. The functions from `lib/math.donk` are now available in your program, as if you'd typed them at the top.
-
-### Rules
-
-- `import` must be at the top level (not inside a function or `if` block).
-- The path is relative to the file doing the import.
-- Importing the same file twice is fine — Donky silently skips the second.
-- Importing in a cycle (A imports B, B imports A) works — Donky handles it.
-- There are no namespaces yet. If two files both define `helper`, the second one wins. Give your functions unique names.
-
-### Try it
-
-Make a `lib/strings.donk` with helper functions like `starts_with(s, prefix) -> bool` and `repeat(s, n) -> str`. Import it in a test program.
-
----
-
-## 16. A complete program: a notes app
-
-Here's a real, useful program that uses everything above. Save as `notes.donk`:
-
-```donky
-import "lib/format.donk";
-
-let path = "notes.txt";
-if len(args) > 0 {
-    path = args[0];
-}
-
-fn load(p) -> array {
-    if !file_exists(p) {
-        return [];
-    }
-    let text = read_file(p);
-    if len(text) == 0 {
-        return [];
-    }
-    return split(text, "\n");
-}
-
-fn save(p, notes) -> void {
-    write_file(p, join(notes, "\n"));
-}
-
-let notes = load(path);
-print("Loaded " + str(len(notes)) + " note(s).");
-
-while true {
-    print("");
-    print("=== Notes ===");
-    print("1) add   2) list   3) delete   4) save   5) quit");
-    let choice = input("choice: ");
-
-    if choice == "1" {
-        push(notes, input("note: "));
-        print("added");
-    } else if choice == "2" {
-        if len(notes) == 0 {
-            print("(empty)");
-        } else {
-            let i = 0;
-            for n in notes {
-                print("  " + str(i + 1) + ". " + n);
-                i = i + 1;
-            }
-        }
-    } else if choice == "3" {
-        if len(notes) == 0 {
-            print("nothing to delete");
-        } else {
-            let i = 0;
-            for n in notes {
-                print("  " + str(i + 1) + ". " + n);
-                i = i + 1;
-            }
-            let n = num(input("delete #: "));
-            let kept = [];
-            let j = 1;
-            for note in notes {
-                if j != n {
-                    push(kept, note);
-                }
-                j = j + 1;
-            }
-            notes = kept;
-            print("deleted");
-        }
-    } else if choice == "4" {
-        save(path, notes);
-        print("saved");
-    } else if choice == "5" {
-        print("bye");
-        break;
-    }
-}
-```
-
-Run it. Add notes. Save. Quit. Run it again. **Your notes are still there.** That's what a real program feels like.
-
----
-
-## 17. Cheat sheet
-
-Keep this handy.
-
-### Comments
-```donky
-// anything after two slashes to end of line is a comment
-```
-
-### Values
-```donky
-42          // whole number
-3.14        // decimal
-"hello"     // string
-true        // boolean
-false       // boolean
-[1, 2, 3]   // array
-{"a": 1}    // map
-```
-
-### Variables
-```donky
-let x = 10;         // create
-x = 20;             // change (must exist)
-```
-
-### Math
-```donky
-+  -  *  /  %       // usual
-div                 // integer division (throws away remainder)
-```
-
-### Comparison
-```donky
-==  !=  <  <=  >  >=
-```
-
-### Logic
-```donky
-&&    // and
-||    // or
-!     // not
-```
-
-### Text
-```donky
-len(s)              // number of characters
-s[0]                // one character (0-indexed)
-s + t               // concatenate
-upper(s)            // uppercase
-lower(s)            // lowercase
-trim(s)             // strip leading/trailing whitespace
-split(s, sep)       // string -> array of strings
-join(arr, sep)      // array of strings -> string
-contains(s, sub)    // bool
-replace(s, old, new) // string
-```
-
-### Arrays
-```donky
-arr[0]              // one element (0-indexed)
-push(arr, x)        // add to end
-pop(arr)            // remove and return last
-len(arr)            // number of items
-sort(arr)           // sort in place (ascending)
-```
-
-### Maps
-```donky
-m["key"]            // get value (crashes if missing)
-m["key"] = v        // set value
-contains(m, "key")  // true if key exists
-keys(m)             // array of all keys
-len(m)              // number of entries
-```
-
-### Type checking
-```donky
-type(x)             // "number" / "string" / "bool" / "array" / "map" / "function"
-num(s)              // string -> number
-str(x)              // anything -> string
-```
-
-### Files and I/O
-```donky
-input("prompt")     // read a line from the user (returns string)
-args                // array of command-line arguments (strings)
-read_file(path)     // whole file as string
-write_file(path, s) // write string to file (overwrites)
-file_exists(path)   // bool
-```
-
-### Statements
-```donky
-let x = expr;                    // declare
-x = expr;                        // assign
-print(expr);                     // display
-if cond { ... } else { ... }     // branch
-if cond { ... } else if cond2 { ... } else { ... }
-
-while cond { ... }               // loop while true
-for x in container { ... }       // loop over each element
-break;                           // exit current loop
-continue;                        // skip to next iteration of loop
-
-try { ... } catch e { ... }      // error handling
-throw "message";                 // raise an error
-
-import "file.donk";              // include another file
-```
-
-### Functions
-```donky
-fn name(a, b) -> num {           // returns a number
-    return a + b;
-}
-
-fn greet(name) -> void {         // returns nothing
     print("Hello, " + name);
 }
 ```
 
-Return types: `num`, `str`, `bool`, `array`, `map`, `any`, `void`.
+### 7.2 Anonymous Functions
+```donky
+let square = fn(x) -> num { return x * x; };
+```
+
+### 7.3 Closures
+Closures capture their environment by reference.
+```donky
+fn make_counter() -> any {
+    let count = 0;
+    return fn() -> num {
+        count = count + 1;
+        return count;
+    };
+}
+
+let c = make_counter();
+print(c()); // 1
+print(c()); // 2
+```
 
 ---
 
-## 18. Troubleshooting
+## 8. Data Structures
 
-**"parse error: expected ';'"**
-You forgot a semicolon at the end of a statement. Check the line and column in the error — they point to where Donky got confused, usually right after where the `;` should be.
+### 8.1 Arrays
+```donky
+let arr = [1, 2, 3];
+push(arr, 4);       // [1, 2, 3, 4]
+pop(arr);           // [1, 2, 3]
+len(arr);           // 3
+arr[0] = 99;
+```
 
-**"parse error: expected '{', got..."**
-You probably wrote `if condition` without opening a block. Donky needs `{ }` around every `if`, `else`, `while`, `for`, and function body, even for a single statement.
+### 8.2 Maps
+```donky
+let m = {"name": "Alice"};
+m["age"] = 30;
+print(contains(m, "name")); // true
+let all_keys = keys(m);
+```
 
-**"undefined variable 'x'"**
-You used `x` before declaring it with `let x = ...`. Check the spelling too — Donky is case-sensitive, so `X` and `x` are different.
+### 8.3 Structs
+Structs are statically checked maps.
+```donky
+struct Point {
+    x: num,
+    y: num
+}
 
-**"assignment to undefined variable 'x'"**
-You tried `x = 5;` without first doing `let x = ...;`. In Donky, `=` updates; `let` creates. To create: `let x = 5;`.
-
-**"index N out of range"**
-You asked for a position that doesn't exist. Arrays and strings start at 0, so `[1, 2, 3][3]` is an error (valid positions: 0, 1, 2).
-
-**"key 'X' not in map"**
-You tried to look up a map key that isn't there. Use `contains(m, "X")` first.
-
-**"condition must be bool"**
-Donky is strict — `if` conditions have to be `true` or `false`, not a number. If you want "any nonzero is true" behavior (like some languages), write `if x != 0 { ... }` explicitly.
-
-**"'+' needs two numbers or two strings"**
-You tried to add a number and a string. Convert first: `str(5) + " apples"`, not `5 + " apples"`.
-
-**"input(): end of input"**
-The user pressed Ctrl+D (or you're running non-interactively without providing input). Make sure you're running the program at a real terminal, not from a script that closes stdin.
-
-**Nothing happens when I run**
-Make sure the file has a `.donk` extension and you spelled it right. `donky myfile.donk`.
-
-**"cannot read file"**
-The path is wrong, or (on Windows) you used a backslash inside a string. Use forward slashes: `"C:/Users/you/file.txt"`.
+let p = Point { x: 10, y: 20 };
+p.x = 15;
+```
 
 ---
 
-## Where to go next
+## 9. Error Handling
 
-You now know all of Donky. To get better:
+### 9.1 Throw
+```donky
+fn divide(a, b) -> num {
+    if b == 0 { throw "Division by zero"; }
+    return a / b;
+}
+```
 
-1. **Rewrite your favorite little tools in Donky.** A unit converter. A flashcard quiz. A log filter. The more you write, the more fluent you get.
-2. **Read the examples folder.** Every file is a small program using one feature well.
-3. **Look at the source.** `donky/lexer.py` is 250 readable lines. Reading how a language is built is a superpower.
-4. **Write a library.** Put helper functions in `lib/` and `import` them. You'll invent things the language needs.
+### 9.2 Try / Catch
+```donky
+try {
+    print(divide(10, 0));
+} catch e {
+    print("Caught: " + e);
+}
+```
 
-If you find something missing — a feature, a builtin, a clearer error message — that's not a bug in *you*, that's a bug in *Donky*. Read the source, find the place, change it, run the tests. **That's how languages grow.**
+---
 
-Welcome to programming.
+## 10. Modules and the Package Manager
+
+### 10.1 Imports
+Imports must be at the top level.
+```donky
+import "lib/strings.donk";
+```
+
+### 10.2 Package Manager
+Create a `donky.json` file:
+```json
+{
+  "name": "my-app",
+  "dependencies": {
+    "strings": "https://raw.githubusercontent.com/EarlDonkey/Donkey-Lang/main/lib/strings.donk"
+  }
+}
+```
+Run `donky install`. Dependencies download to `donky_modules/`.
+
+---
+
+## 11. Standard Library Reference
+
+### 11.1 `lib/list.donk`
+- `map(arr, f)`: Apply `f` to each element.
+- `filter(arr, f)`: Keep elements where `f` is true.
+- `reduce(arr, f, init)`: Fold the array.
+- `sort_by(arr, f)`: Stable sort by a derived key.
+- `reverse(arr)`: Reverse a new array.
+- `unique(arr)`: Remove duplicates.
+- `any(arr, f)`: True if any pass.
+- `all(arr, f)`: True if all pass.
+- `count(arr, f)`: Count passing elements.
+
+### 11.2 `lib/strings.donk`
+- `starts_with(s, prefix)`
+- `ends_with(s, suffix)`
+- `slice(s, start, end)`
+- `index_of(s, needle)`
+
+### 11.3 `lib/format.donk`
+- `format_num(x, places)`
+- `pad_left(s, width, ch)`
+- `pad_right(s, width, ch)`
+- `repeat(s, n)`
+
+### 11.4 `lib/math.donk`
+- `min(a, b)`, `max(a, b)`, `abs(n)`
+- `pow(base, exp)`
+- `sqrt(n)`
+
+### 11.5 `lib/csv.donk`
+- `parse_line(line)`
+- `format_line(fields)`
+- `parse_table(text)`
+- `format_table(rows)`
+
+---
+
+## 12. Networking and Concurrency
+
+### 12.1 TCP Sockets
+- `tcp_listen(port) -> num`
+- `tcp_accept(server_id) -> num`
+- `tcp_read(client_id, max_bytes) -> string`
+- `tcp_write(client_id, data) -> void`
+- `tcp_close(socket_id) -> void`
+- `tcp_connect(ip, port, timeout) -> bool`
+
+### 12.2 Web & HTTP
+- `http_get(url) -> string`
+- `ws_accept(client_id, key) -> void`
+- `ws_read(client_id) -> string`
+- `ws_write(client_id, msg) -> void`
+
+### 12.3 Utilities
+- `get_local_ip() -> string`
+- `ip_to_list(cidr) -> array`
+- `dns_lookup(ip) -> string`
+- `get_mac(ip) -> string`
+- `mime_type(filepath) -> string`
+- `url_decode(str) -> string`
+- `sleep(seconds) -> void`
+- `time() -> number`
+
+### 12.4 Concurrency (`spawn`)
+`spawn(fn)` runs a function in a background thread.
+```donky
+spawn(fn() -> void {
+    print("Running in background");
+});
+```
+
+---
+
+## 13. The Bytecode Compiler and VM
+
+The `compiler/` directory contains a self-hosted Donky compiler.
+
+### 13.1 Compilation Pipeline
+1. Source Code → `compiler/lexer.donk`
+2. Tokens → `compiler/parser.donk`
+3. AST → `compiler/bytecode_compiler.donk`
+4. Flat Instructions → `compiler/bytecode_vm.donk`
+
+### 13.2 Using the Compiler
+```powershell
+donky compiler/compile.donk examples/simple.donk compiled.json
+donky compiler/run_json.donk compiled.json
+```
+
+---
+
+## 14. Appendix A: EBNF Grammar
+
+```ebnf
+program        → statement* EOF
+
+statement      → letStmt | printStmt | ifStmt | whileStmt | forStmt
+               | fnStmt | returnStmt | breakStmt | continueStmt
+               | tryStmt | throwStmt | importStmt | structStmt
+               | block | exprStmt
+
+letStmt        → "let" IDENT "=" expression ";"
+printStmt      → "print" "(" expression ")" ";"
+ifStmt         → "if" expression block ("else" (ifStmt | block))?
+whileStmt      → "while" expression block
+forStmt        → "for" IDENT "in" expression block
+fnStmt         → "fn" IDENT "(" params? ")" "->" IDENT block
+returnStmt     → "return" expression? ";"
+breakStmt      → "break" ";"
+continueStmt   → "continue" ";"
+tryStmt        → "try" block "catch" IDENT block
+throwStmt      → "throw" expression ";"
+importStmt     → "import" STRING ";"
+structStmt     → "struct" IDENT "{" structFields "}"
+block          → "{" statement* "}"
+exprStmt       → expression ";"
+
+expression     → assignment
+assignment     → (call ".")? IDENT "=" assignment | logic_or
+
+logic_or       → logic_and ("||" logic_and)*
+logic_and      → equality ("&&" equality)*
+equality       → comparison (("==" | "!=") comparison)*
+comparison     → term ((">" | ">=" | "<" | "<=") term)*
+term           → factor (("-" | "+") factor)*
+factor         → unary (("/" | "*" | "%" | "div") unary)*
+unary          → ("!" | "-") unary | call
+call           → primary ("(" arguments? ")" | "." IDENT | "[" expression "]")*
+primary        → NUMBER | STRING | "true" | "false" | "(" expression ")"
+               | IDENT | array | map | fnExpr
+array          → "[" (expression ("," expression)*)? "]"
+map            → "{" (expression ":" expression ("," expression ":" expression)*)? "}"
+fnExpr         → "fn" "(" params? ")" "->" IDENT block
+```
+
+---
+
+## 15. Appendix B: Opcode Reference
+
+| Opcode | Stack Effect | Description |
+|--------|--------------|-------------|
+| `CONST idx` | `→ val` | Push constant. |
+| `TRUE` / `FALSE` | `→ bool` | Push boolean. |
+| `POP` | `val →` | Discard top. |
+| `LOAD_LOCAL slot` | `→ val` | Load local var. |
+| `STORE_LOCAL slot` | `val →` | Store local var. |
+| `LOAD_GLOBAL name` | `→ val` | Load global var. |
+| `STORE_GLOBAL name` | `val →` | Store global var. |
+| `ADD` / `SUB` / `MUL` / `DIV` | `a, b → c` | Arithmetic. |
+| `EQ` / `NE` / `LT` / `LE` / `GT` / `GE` | `a, b → bool` | Comparison. |
+| `JUMP idx` | `→` | Unconditional jump. |
+| `JUMP_IF_FALSE idx` | `bool →` | Pop, jump if false. |
+| `CLOSURE idx, n` | `→ closure` | Create closure. |
+| `CALL argc` | `args → result` | Call function. |
+| `RETURN` | `val →` | Return from function. |
+| `PRINT` | `val →` | Pop and print. |
+
+---
+
+## 16. Appendix C: Architecture and Internals
+
+### 16.1 The Lexer
+The lexer is a hand-written state machine. It scans characters, skipping whitespace and `//` comments. It groups characters into `Token` structs. Strings are handled specially to support `\n`, `\t`, and `${}` interpolation.
+
+### 16.2 The Parser
+The parser is a **Pratt Parser** (Top-Down Operator Precedence). It assigns a binding power to each infix operator to determine precedence. Statements are parsed using standard recursive descent.
+
+### 16.3 The Type Checker
+The type checker performs a single pass over the AST. It maintains a scope tree. It ensures that:
+- Variables are declared before use.
+- Functions are called with the correct number of arguments.
+- Binary operations are only performed on compatible types (e.g., `number + number`).
+
+### 16.4 The VM (Virtual Machine)
+The bytecode VM uses a `while` loop with an Instruction Pointer (`ip`). It reads an instruction, modifies the stack, and increments the `ip`. Jumps are handled by directly modifying the `ip`.
+
+---
+
+## 17. Appendix D: Known Limitations
+
+1. **No Garbage Collection:** Donky relies on Python's memory management.
+2. **No Static Typing for Variables:** Only function returns and structs enforce types.
+3. **No Classes:** Donky uses Structs and Closures instead of Object-Oriented classes.
+4. **Single-threaded Compiler:** The self-hosted compiler does not support concurrent compilation.
+5. **No Regex:** The standard library has string manipulation, but no regular expressions.
+6. **Windows Only Pre-built:** The installer is compiled for Windows x64. Mac/Linux users must run via Python.
