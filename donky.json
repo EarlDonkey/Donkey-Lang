@@ -1,0 +1,9 @@
+{
+  "name": "donky-lang-demo",
+  "version": "1.0.0",
+  "description": "A demo project using the Donky package manager",
+  "dependencies": {
+    "strings": "https://raw.githubusercontent.com/EarlDonkey/Donkey-Lang/main/lib/strings.donk",
+    "format": "https://raw.githubusercontent.com/EarlDonkey/Donkey-Lang/main/lib/format.donk"
+  }
+}

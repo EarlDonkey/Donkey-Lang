@@ -1,0 +1,8 @@
+import "../lib/strings.donk";
+
+print("Fetching https://example.com...");
+let html = http_get("https://example.com");
+
+print("Downloaded " + str(len(html)) + " bytes.");
+print("First 100 characters:");
+print(slice(html, 0, 100));

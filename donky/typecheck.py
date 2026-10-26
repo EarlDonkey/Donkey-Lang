@@ -43,6 +43,7 @@ BUILTIN_RETURNS = {
     "url_decode":  TYPE_STRING,
     "mime_type":   TYPE_STRING,
     "spawn":       TYPE_ANY,
+    "http_get":    TYPE_STRING,
 }
 
 

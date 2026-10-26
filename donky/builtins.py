@@ -2,6 +2,7 @@ import socket
 import itertools
 import threading
 import urllib.parse
+import urllib.request
 
 from donky.errors import DonkyRuntimeError
 from donky.values import (
@@ -225,6 +226,18 @@ def _tcp_close(args: list[object]) -> object:
         except Exception: pass
     return None
 
+def _http_get(args: list[object]) -> object:
+    url = args[0]
+    if not isinstance(url, str):
+        raise DonkyRuntimeError("http_get() expects string URL")
+    try:
+        # Standard library HTTP request
+        req = urllib.request.Request(url, headers={'User-Agent': 'Donky-Lang/3.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return response.read().decode('utf-8', errors='replace')
+    except Exception as e:
+        raise DonkyRuntimeError(f"http_get failed: {e}")
+
 def _url_decode(args: list[object]) -> object:
     s = args[0]
     if not isinstance(s, str):
@@ -274,6 +287,7 @@ BUILTINS = [
     ("url_decode", 1, _url_decode,   1),
     ("mime_type",  1, _mime_type,    1),
     ("spawn",      1, _spawn,        1),
+    ("http_get",   1, _http_get,     1),
 ]
 
 def install_builtins(env: Environment, args: list[str] | None = None) -> None:

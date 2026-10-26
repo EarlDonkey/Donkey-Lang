@@ -1,5 +1,5 @@
-import os
 import sys
+import os
 
 from donky import modules
 from donky import typecheck
@@ -10,9 +10,19 @@ from donky.lexer import LexError, Lexer
 from donky.parser import ParseError, Parser
 from donky.vm import VM
 
+# Import the package manager
+from donky import package
+
 
 def main() -> None:
     argv = sys.argv[1:]
+    
+    # --- New Package Manager Logic ---
+    if len(argv) > 0 and argv[0] == "install":
+        package.install()
+        return
+    # ---------------------------------
+
     use_bytecode = False
     use_types = True
     check_only = False
@@ -72,7 +82,6 @@ def main() -> None:
     except DonkyRuntimeError as e:
         print(f"{path}: {e}", file=sys.stderr)
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

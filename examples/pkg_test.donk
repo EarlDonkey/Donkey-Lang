@@ -1,0 +1,7 @@
+import "../donky_modules/strings.donk";
+import "../donky_modules/format.donk";
+
+let text = "hello world";
+print("Original: " + text);
+print("Uppercase: " + upper(text));
+print("Padded: " + pad_left("42", 5, "0"));
