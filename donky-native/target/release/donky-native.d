@@ -1,0 +1,1 @@
+C:\Users\user\Desktop\Donky-Lang\donky-native\target\release\donky-native.exe: C:\Users\user\Desktop\Donky-Lang\donky-native\src\ast.rs C:\Users\user\Desktop\Donky-Lang\donky-native\src\interpreter.rs C:\Users\user\Desktop\Donky-Lang\donky-native\src\lexer.rs C:\Users\user\Desktop\Donky-Lang\donky-native\src\main.rs C:\Users\user\Desktop\Donky-Lang\donky-native\src\parser.rs

@@ -19,9 +19,7 @@ fn new_state(token_list) -> map {
 fn p_peek(state) -> any {
     let t = state["tokens"];
     let p = state["pos"];
-    if p >= len(t) {
-        return t[len(t) - 1]; // EOF
-    }
+    if p >= len(t) { return t[len(t) - 1]; }
     return t[p];
 }
 
@@ -73,9 +71,7 @@ fn parse_expr(state, min_bp) -> map {
     while true {
         let op_tok = p_peek(state);
         let bp = get_infix_bp(op_tok.type);
-        if bp == -1 || bp < min_bp {
-            break;
-        }
+        if bp == -1 || bp < min_bp { break; }
         p_advance(state);
         let right = parse_expr(state, bp + 1);
         
@@ -134,17 +130,6 @@ fn parse_prefix(state) -> map {
         p_expect(state, "RPAREN");
         return expr;
     }
-    if tok.type == "LBRACKET" {
-        let elems = [];
-        if !p_check(state, "RBRACKET") {
-            push(elems, parse_expr(state, 0));
-            while p_match(state, "COMMA") {
-                push(elems, parse_expr(state, 0));
-            }
-        }
-        p_expect(state, "RBRACKET");
-        return make_node("ArrayLit", { "elems": elems, "line": tok.line, "col": tok.col });
-    }
 
     throw "Unexpected token in expression: " + tok.type + " at " + str(tok.line) + ":" + str(tok.col);
 }
@@ -199,6 +184,26 @@ fn parse_return(state) -> map {
     return make_node("ReturnStmt", { "value": value, "line": tok.line, "col": tok.col });
 }
 
+fn parse_fn(state) -> map {
+    let tok = p_advance(state);
+    let name = p_expect(state, "IDENT");
+    p_expect(state, "LPAREN");
+    let params = [];
+    if !p_check(state, "RPAREN") {
+        while true {
+            push(params, p_expect(state, "IDENT").lexeme);
+            if !p_match(state, "COMMA") { break; }
+        }
+    }
+    p_expect(state, "RPAREN");
+    p_expect(state, "MINUS");
+    p_expect(state, "GT");
+    if p_check(state, "IDENT") { p_advance(state); }
+    
+    let body = parse_block(state);
+    return make_node("FnStmt", { "name": name.lexeme, "params": params, "body": body, "line": tok.line, "col": tok.col });
+}
+
 fn parse_block(state) -> map {
     let tok = p_expect(state, "LBRACE");
     let stmts = [];
@@ -231,6 +236,7 @@ fn parse_statement(state) -> map {
     if p_check(state, "IF")     { return parse_if(state); }
     if p_check(state, "WHILE")  { return parse_while(state); }
     if p_check(state, "RETURN") { return parse_return(state); }
+    if p_check(state, "FN")     { return parse_fn(state); }
     if p_check(state, "LBRACE") { return parse_block(state); }
     return parse_expr_stmt(state);
 }
