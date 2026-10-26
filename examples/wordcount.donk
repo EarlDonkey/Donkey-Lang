@@ -1,0 +1,23 @@
+if len(args) < 1 {
+    print("usage: wordcount.donk FILE");
+} else {
+    let text = read_file(args[0]);
+    let lines = split(text, "\n");
+    print("lines: " + str(len(lines)));
+    print("chars: " + str(len(text)));
+
+    let word_count = 0;
+    let i = 0;
+    while i < len(lines) {
+        let words = split(trim(lines[i]), " ");
+        let j = 0;
+        while j < len(words) {
+            if len(words[j]) > 0 {
+                word_count = word_count + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    print("words: " + str(word_count));
+}

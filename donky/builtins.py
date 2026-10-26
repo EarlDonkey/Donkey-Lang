@@ -101,6 +101,102 @@ def _write_file(args: list[object]) -> object:
     return None
 
 
+# ---------- string builtins ----------
+
+def _split(args: list[object]) -> object:
+    s, sep = args
+    if not isinstance(s, str):
+        raise DonkyRuntimeError(
+            f"split() expects string as first argument, got {type_name(s)}"
+        )
+    if not isinstance(sep, str):
+        raise DonkyRuntimeError(
+            f"split() expects string separator, got {type_name(sep)}"
+        )
+    if sep == "":
+        raise DonkyRuntimeError("split() separator cannot be empty")
+    return s.split(sep)
+
+
+def _join(args: list[object]) -> object:
+    arr, sep = args
+    if not isinstance(arr, list):
+        raise DonkyRuntimeError(
+            f"join() expects array, got {type_name(arr)}"
+        )
+    if not isinstance(sep, str):
+        raise DonkyRuntimeError(
+            f"join() expects string separator, got {type_name(sep)}"
+        )
+    parts = []
+    for i, e in enumerate(arr):
+        if not isinstance(e, str):
+            raise DonkyRuntimeError(
+                f"join() element {i} is {type_name(e)}, expected string"
+            )
+        parts.append(e)
+    return sep.join(parts)
+
+
+def _contains(args: list[object]) -> object:
+    s, sub = args
+    if not isinstance(s, str):
+        raise DonkyRuntimeError(
+            f"contains() expects string, got {type_name(s)}"
+        )
+    if not isinstance(sub, str):
+        raise DonkyRuntimeError(
+            f"contains() expects string substring, got {type_name(sub)}"
+        )
+    return sub in s
+
+
+def _upper(args: list[object]) -> object:
+    s = args[0]
+    if not isinstance(s, str):
+        raise DonkyRuntimeError(
+            f"upper() expects string, got {type_name(s)}"
+        )
+    return s.upper()
+
+
+def _lower(args: list[object]) -> object:
+    s = args[0]
+    if not isinstance(s, str):
+        raise DonkyRuntimeError(
+            f"lower() expects string, got {type_name(s)}"
+        )
+    return s.lower()
+
+
+def _trim(args: list[object]) -> object:
+    s = args[0]
+    if not isinstance(s, str):
+        raise DonkyRuntimeError(
+            f"trim() expects string, got {type_name(s)}"
+        )
+    return s.strip()
+
+
+def _replace(args: list[object]) -> object:
+    s, old, new = args
+    if not isinstance(s, str):
+        raise DonkyRuntimeError(
+            f"replace() expects string, got {type_name(s)}"
+        )
+    if not isinstance(old, str):
+        raise DonkyRuntimeError(
+            f"replace() expects string old, got {type_name(old)}"
+        )
+    if not isinstance(new, str):
+        raise DonkyRuntimeError(
+            f"replace() expects string new, got {type_name(new)}"
+        )
+    if old == "":
+        raise DonkyRuntimeError("replace() old cannot be empty")
+    return s.replace(old, new)
+
+
 BUILTINS = [
     ("len",        1, _len),
     ("str",        1, _str),
@@ -110,6 +206,13 @@ BUILTINS = [
     ("pop",        1, _pop),
     ("read_file",  1, _read_file),
     ("write_file", 2, _write_file),
+    ("split",      2, _split),
+    ("join",       2, _join),
+    ("contains",   2, _contains),
+    ("upper",      1, _upper),
+    ("lower",      1, _lower),
+    ("trim",       1, _trim),
+    ("replace",    3, _replace),
 ]
 
 

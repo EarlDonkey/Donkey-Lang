@@ -490,3 +490,48 @@ def test_diff_write_file(tmp_path):
 def test_diff_err_read_file_missing(tmp_path):
     p = tmp_path / "nope.txt"
     assert_same_error(f'print(read_file("{p.as_posix()}"));')
+    
+# ---------- Session 8: strings ----------
+
+def test_diff_string_index():
+    assert assert_same('print("hello"[0]);') == "h\n"
+
+
+def test_diff_string_index_loop():
+    assert_same(
+        'let s = "abc";'
+        'let i = 0;'
+        'while i < len(s) { print(s[i]); i = i + 1; }'
+    )
+
+
+def test_diff_split():
+    assert_same('print(split("a,b,c", ","));')
+
+
+def test_diff_join():
+    assert_same('print(join(["a", "b", "c"], "-"));')
+
+
+def test_diff_contains():
+    assert_same('print(contains("hello", "ell"));')
+
+
+def test_diff_upper_lower():
+    assert_same('print(upper("hi")); print(lower("HI"));')
+
+
+def test_diff_trim():
+    assert_same('print(trim("  x  "));')
+
+
+def test_diff_replace():
+    assert_same('print(replace("a-b-c", "-", "+"));')
+
+
+def test_diff_err_string_index_oob():
+    assert_same_error('print("hi"[5]);')
+
+
+def test_diff_err_string_index_set():
+    assert_same_error('let s = "abc"; s[0] = "x";')

@@ -57,6 +57,11 @@ class Interpreter:
                     array = self.env.get(name)
                 except DonkyRuntimeError:
                     raise self._err(stmt, f"undefined variable '{name}'")
+                if isinstance(array, str):
+                    raise self._err(
+                        stmt,
+                        "cannot assign to string index (strings are immutable)",
+                    )
                 index = self.eval_expr(index_expr)
                 value = self.eval_expr(value_expr)
                 self._check_index(array, index, stmt)
@@ -144,13 +149,18 @@ class Interpreter:
                 raise DonkyRuntimeError(f"cannot evaluate {type(expr).__name__}")
 
     def _check_index(self, array: object, index: object, node: object) -> None:
-        if not isinstance(array, list):
-            raise self._err(node, f"cannot index {type_name(array)}, expected array")
+        if not isinstance(array, (list, str)):
+            raise self._err(
+                node,
+                f"cannot index {type_name(array)}, expected array or string",
+            )
         if not is_int(index):
-            raise self._err(node, f"array index must be integer, got {type_name(index)}")
+            raise self._err(
+                node, f"index must be integer, got {type_name(index)}"
+            )
         if index < 0 or index >= len(array):
             raise self._err(
-                node, f"index {index} out of range for array of length {len(array)}"
+                node, f"index {index} out of range for length {len(array)}"
             )
 
     def _eval_unary(self, op: str, operand: object, node: ast.Expr) -> object:

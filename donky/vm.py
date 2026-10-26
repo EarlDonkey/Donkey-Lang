@@ -219,6 +219,10 @@ class VM:
                 value = self.stack.pop()
                 index = self.stack.pop()
                 array = self.stack.pop()
+                if isinstance(array, str):
+                    raise self._err(
+                        "cannot assign to string index (strings are immutable)"
+                    )
                 self._check_index(array, index)
                 array[index] = value
             case _:
@@ -265,17 +269,17 @@ class VM:
         return q
 
     def _check_index(self, array: object, index: object) -> None:
-        if not isinstance(array, list):
+        if not isinstance(array, (list, str)):
             raise self._err(
-                f"cannot index {type_name(array)}, expected array"
+                f"cannot index {type_name(array)}, expected array or string"
             )
         if not is_int(index):
             raise self._err(
-                f"array index must be integer, got {type_name(index)}"
+                f"index must be integer, got {type_name(index)}"
             )
         if index < 0 or index >= len(array):
             raise self._err(
-                f"index {index} out of range for array of length {len(array)}"
+                f"index {index} out of range for length {len(array)}"
             )
 
     def _call(self, argc: int, name: str) -> None:
