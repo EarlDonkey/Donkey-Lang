@@ -8,13 +8,14 @@ from donky.values import (
 
 
 class Frame:
-    __slots__ = ("code", "ip", "slots", "closure")
+    __slots__ = ("code", "ip", "slots", "closure", "handlers")
 
     def __init__(self, code: CodeObject, closure: Closure | None = None):
         self.code = code
         self.ip = 0
         self.slots: list[Cell] = [Cell() for _ in range(code.slot_count)]
         self.closure = closure
+        self.handlers: list[tuple[int, int]] = []
 
 
 class VM:
@@ -55,8 +56,20 @@ class VM:
             except DonkyRuntimeError as e:
                 if e.line == 0:
                     line, col = self.position
-                    raise DonkyRuntimeError(e.message, line, col) from None
-                raise
+                    e = DonkyRuntimeError(e.message, line, col)
+                self._handle_error(e)
+
+    def _handle_error(self, err: DonkyRuntimeError) -> None:
+        while self.frames:
+            frame = self.frames[-1]
+            if frame.handlers:
+                target, depth = frame.handlers.pop()
+                del self.stack[depth:]
+                self.stack.append(err.message)
+                frame.ip = target
+                return
+            self.frames.pop()
+        raise err
 
     def _dispatch(self, instr: tuple, frame: Frame) -> None:
         op = instr[0]
@@ -210,21 +223,78 @@ class VM:
                 elems = [self.stack.pop() for _ in range(n)]
                 elems.reverse()
                 self.stack.append(elems)
+            case Op.NEW_MAP:
+                n = instr[1]
+                entries = [self.stack.pop() for _ in range(2 * n)]
+                entries.reverse()
+                result = {}
+                for i in range(n):
+                    k = entries[2 * i]
+                    v = entries[2 * i + 1]
+                    if isinstance(k, (list, dict)):
+                        raise self._err(
+                            f"map key cannot be {type_name(k)}"
+                        )
+                    result[k] = v
+                self.stack.append(result)
+            case Op.NEW_ITER:
+                container = self.stack.pop()
+                if isinstance(container, dict):
+                    self.stack.append(iter(list(container.keys())))
+                elif isinstance(container, (list, str)):
+                    self.stack.append(iter(list(container)))
+                else:
+                    raise self._err(
+                        f"cannot iterate {type_name(container)}"
+                    )
+            case Op.ITER_NEXT:
+                it = self.stack[-1]
+                try:
+                    val = next(it)
+                except StopIteration:
+                    frame.ip = instr[1]
+                else:
+                    self.stack.append(val)
             case Op.INDEX_GET:
                 index = self.stack.pop()
-                array = self.stack.pop()
-                self._check_index(array, index)
-                self.stack.append(array[index])
+                container = self.stack.pop()
+                if isinstance(container, dict):
+                    if index not in container:
+                        raise self._err(
+                            f"key {format_value(index)!r} not in map"
+                        )
+                    self.stack.append(container[index])
+                else:
+                    self._check_index(container, index)
+                    self.stack.append(container[index])
             case Op.INDEX_SET:
                 value = self.stack.pop()
                 index = self.stack.pop()
-                array = self.stack.pop()
-                if isinstance(array, str):
+                container = self.stack.pop()
+                if isinstance(container, str):
                     raise self._err(
                         "cannot assign to string index (strings are immutable)"
                     )
-                self._check_index(array, index)
-                array[index] = value
+                if isinstance(container, dict):
+                    if isinstance(index, (list, dict)):
+                        raise self._err(
+                            f"map key cannot be {type_name(index)}"
+                        )
+                    container[index] = value
+                else:
+                    self._check_index(container, index)
+                    container[index] = value
+            case Op.PUSH_TRY:
+                frame.handlers.append((instr[1], len(self.stack)))
+            case Op.POP_TRY:
+                frame.handlers.pop()
+            case Op.THROW:
+                msg = self.stack.pop()
+                if not isinstance(msg, str):
+                    raise self._err(
+                        f"throw expects string, got {type_name(msg)}"
+                    )
+                raise self._err(msg)
             case _:
                 raise self._err(f"unknown opcode {op}")
 

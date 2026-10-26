@@ -65,6 +65,12 @@ class ArrayLit:
     col: int = 0
 
 @dataclass
+class MapLit:
+    entries: list[tuple[Expr, Expr]]
+    line: int = 0
+    col: int = 0
+
+@dataclass
 class Index:
     array: Expr
     index: Expr
@@ -109,6 +115,14 @@ class WhileStmt:
     col: int = 0
 
 @dataclass
+class ForStmt:
+    var_name: str
+    iter_expr: Expr
+    body: Block
+    line: int = 0
+    col: int = 0
+
+@dataclass
 class FnStmt:
     name: str
     params: list[str]
@@ -134,6 +148,20 @@ class ContinueStmt:
     col: int = 0
 
 @dataclass
+class TryStmt:
+    body: Block
+    err_name: str
+    handler: Block
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class ThrowStmt:
+    value: Expr
+    line: int = 0
+    col: int = 0
+
+@dataclass
 class Block:
     stmts: list[Stmt]
     line: int = 0
@@ -155,8 +183,8 @@ class Program:
     col: int = 0
 
 
-# type aliases
 Expr = (NumberLit | StringLit | BoolLit | Ident | Binary | Unary
-        | Assign | Call | ArrayLit | Index)
-Stmt = (LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | FnStmt
-        | ReturnStmt | Block | IndexSet | BreakStmt | ContinueStmt)
+        | Assign | Call | ArrayLit | MapLit | Index)
+Stmt = (LetStmt | PrintStmt | ExprStmt | IfStmt | WhileStmt | ForStmt
+        | FnStmt | ReturnStmt | Block | IndexSet | BreakStmt | ContinueStmt
+        | TryStmt | ThrowStmt)

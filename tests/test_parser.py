@@ -172,3 +172,48 @@ def test_array_trailing_comma_errors():
 def test_index_missing_bracket():
     with pytest.raises(ParseError):
         parse_expr("a[0")
+
+def test_for_parses():
+    p = parse_program("for x in arr { print(x); }")
+    s = p.stmts[0]
+    assert isinstance(s, ast.ForStmt) and s.var_name == "x"
+
+
+def test_try_parses():
+    p = parse_program("try { } catch e { }")
+    s = p.stmts[0]
+    assert isinstance(s, ast.TryStmt) and s.err_name == "e"
+
+
+def test_throw_parses():
+    p = parse_program('throw "oops";')
+    assert isinstance(p.stmts[0], ast.ThrowStmt)
+
+
+def test_map_literal_parses():
+    e = parse_expr('{"a": 1, "b": 2}')
+    assert isinstance(e, ast.MapLit) and len(e.entries) == 2
+
+
+def test_empty_map_parses():
+    e = parse_expr("{}")
+    assert isinstance(e, ast.MapLit) and e.entries == []
+
+def test_else_if_parses():
+    p = parse_program("if false { } else if true { }")
+    s = p.stmts[0]
+    assert isinstance(s, ast.IfStmt)
+    assert isinstance(s.else_, ast.Block)
+    assert len(s.else_.stmts) == 1
+    assert isinstance(s.else_.stmts[0], ast.IfStmt)
+
+
+def test_else_if_chain_parses():
+    p = parse_program("if a { } else if b { } else if c { } else { }")
+    s = p.stmts[0]
+    assert isinstance(s.else_, ast.Block)
+    nested = s.else_.stmts[0]
+    assert isinstance(nested, ast.IfStmt)
+    assert isinstance(nested.else_, ast.Block)
+    assert isinstance(nested.else_.stmts[0], ast.IfStmt)
+    assert nested.else_.stmts[0].else_ is not None

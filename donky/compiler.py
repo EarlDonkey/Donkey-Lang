@@ -35,6 +35,7 @@ class CompileContext:
 class LoopContext:
     start_offset: int
     break_patches: list[int]
+    try_depth: int
 
 
 class Compiler:
@@ -45,14 +46,13 @@ class Compiler:
         self.position: tuple[int, int] = (0, 0)
         self.enclosing: list[CompileContext] = []
         self.loop_stack: list[LoopContext] = []
+        self.try_depth = 0
 
     def compile(self, program: ast.Program) -> CodeObject:
         for stmt in program.stmts:
             self.compile_stmt(stmt)
         self.code.slot_count = self.slot_counter
         return self.code
-
-    # ---------- scopes ----------
 
     def _push_scope(self) -> None:
         self.scopes.append({})
@@ -75,8 +75,6 @@ class Compiler:
         self.slot_counter += 1
         self.scopes[-1][name] = slot
         return slot
-
-    # ---------- upvalues ----------
 
     def _add_upvalue(self, code: CodeObject,
                      from_parent_local: bool, index: int) -> int:
@@ -108,8 +106,6 @@ class Compiler:
             return ("upvalue", idx)
         return ("global", None)
 
-    # ---------- emit helpers ----------
-
     def _emit(self, op: Op, *args) -> int:
         idx = len(self.code.instructions)
         self.code.instructions.append((op,) + args)
@@ -128,8 +124,6 @@ class Compiler:
 
     def _current_offset(self) -> int:
         return len(self.code.instructions)
-
-    # ---------- name load/store ----------
 
     def _load_name(self, name: str) -> None:
         kind, idx = self._resolve(name)
@@ -156,8 +150,6 @@ class Compiler:
         else:
             self._emit(Op.STORE_GLOBAL, name)
 
-    # ---------- statements ----------
-
     def compile_stmt(self, stmt: ast.Stmt) -> None:
         line = getattr(stmt, "line", 0)
         col = getattr(stmt, "col", 0)
@@ -179,6 +171,13 @@ class Compiler:
                 self._compile_if(cond, then, else_)
             case ast.WhileStmt(cond, body, line, col):
                 self._compile_while(cond, body)
+            case ast.ForStmt(var_name, iter_expr, body, line, col):
+                self._compile_for(var_name, iter_expr, body)
+            case ast.TryStmt(body, err_name, handler, line, col):
+                self._compile_try(body, err_name, handler)
+            case ast.ThrowStmt(value, line, col):
+                self.compile_expr(value)
+                self._emit(Op.THROW)
             case ast.FnStmt(name, params, ret, body, line, col):
                 fn_code = self._compile_function(name, params, body)
                 fn_idx = len(self.code.functions)
@@ -203,12 +202,18 @@ class Compiler:
             case ast.BreakStmt(line, col):
                 if not self.loop_stack:
                     raise CompileError("'break' outside of a loop", line, col)
+                loop = self.loop_stack[-1]
+                for _ in range(self.try_depth - loop.try_depth):
+                    self._emit(Op.POP_TRY)
                 idx = self._emit_jump(Op.JUMP)
-                self.loop_stack[-1].break_patches.append(idx)
+                loop.break_patches.append(idx)
             case ast.ContinueStmt(line, col):
                 if not self.loop_stack:
                     raise CompileError("'continue' outside of a loop", line, col)
-                self._emit(Op.JUMP, self.loop_stack[-1].start_offset)
+                loop = self.loop_stack[-1]
+                for _ in range(self.try_depth - loop.try_depth):
+                    self._emit(Op.POP_TRY)
+                self._emit(Op.JUMP, loop.start_offset)
             case ast.Block(stmts, line, col):
                 self._compile_block_scoped(stmt)
             case ast.IndexSet(name, index, value, line, col):
@@ -242,7 +247,8 @@ class Compiler:
         self.position = saved
         jf_idx = self._emit_jump(Op.JUMP_IF_FALSE)
 
-        ctx = LoopContext(start_offset=loop_start, break_patches=[])
+        ctx = LoopContext(start_offset=loop_start, break_patches=[],
+                          try_depth=self.try_depth)
         self.loop_stack.append(ctx)
         try:
             self._compile_block_scoped(body)
@@ -253,6 +259,54 @@ class Compiler:
         self._patch_jump(jf_idx)
         for bp in ctx.break_patches:
             self._patch_jump(bp)
+
+    def _compile_for(self, var_name, iter_expr, body):
+        self.compile_expr(iter_expr)
+        self._emit(Op.NEW_ITER)
+
+        loop_start = self._current_offset()
+        jf_idx = self._emit_jump(Op.ITER_NEXT)
+
+        ctx = LoopContext(start_offset=loop_start, break_patches=[],
+                          try_depth=self.try_depth)
+        self.loop_stack.append(ctx)
+        try:
+            self._push_scope()
+            try:
+                slot = self._declare_local(var_name)
+                self._emit(Op.STORE_LOCAL, slot)
+                for s in body.stmts:
+                    self.compile_stmt(s)
+            finally:
+                self._pop_scope()
+        finally:
+            self.loop_stack.pop()
+
+        self._emit(Op.JUMP, loop_start)
+        self._patch_jump(jf_idx)
+        for bp in ctx.break_patches:
+            self._patch_jump(bp)
+        self._emit(Op.POP)
+
+    def _compile_try(self, body, err_name, handler):
+        push_try_idx = self._emit_jump(Op.PUSH_TRY)
+        self.try_depth += 1
+        try:
+            self._compile_block_scoped(body)
+        finally:
+            self.try_depth -= 1
+        self._emit(Op.POP_TRY)
+        end_idx = self._emit_jump(Op.JUMP)
+        self._patch_jump(push_try_idx)
+
+        self._push_scope()
+        try:
+            slot = self._declare_local(err_name)
+            self._emit(Op.STORE_LOCAL, slot)
+            self._compile_block_scoped(handler)
+        finally:
+            self._pop_scope()
+        self._patch_jump(end_idx)
 
     def _compile_block_scoped(self, block: ast.Block) -> None:
         self._push_scope()
@@ -270,6 +324,7 @@ class Compiler:
         saved_slots = self.slot_counter
         saved_position = self.position
         saved_loop_stack = self.loop_stack
+        saved_try_depth = self.try_depth
 
         self.enclosing.append(
             CompileContext(saved_code, saved_scopes, saved_slots)
@@ -279,6 +334,7 @@ class Compiler:
         self.scopes = []
         self.slot_counter = 0
         self.loop_stack = []
+        self.try_depth = 0
 
         try:
             self._push_scope()
@@ -303,10 +359,9 @@ class Compiler:
             self.slot_counter = saved_slots
             self.position = saved_position
             self.loop_stack = saved_loop_stack
+            self.try_depth = saved_try_depth
 
         return fn_code
-
-    # ---------- expressions ----------
 
     def compile_expr(self, expr: ast.Expr) -> None:
         line = getattr(expr, "line", 0)
@@ -359,8 +414,13 @@ class Compiler:
                 for e in elems:
                     self.compile_expr(e)
                 self._emit(Op.NEW_ARRAY, len(elems))
-            case ast.Index(array, index, line, col):
-                self.compile_expr(array)
+            case ast.MapLit(entries, line, col):
+                for k, v in entries:
+                    self.compile_expr(k)
+                    self.compile_expr(v)
+                self._emit(Op.NEW_MAP, len(entries))
+            case ast.Index(container, index, line, col):
+                self.compile_expr(container)
                 self.compile_expr(index)
                 self._emit(Op.INDEX_GET)
             case _:

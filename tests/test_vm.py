@@ -594,3 +594,135 @@ def test_diff_input_number(monkeypatch, capsys):
     capsys.readouterr()  # clear
     b = _run_vm(src)
     assert a == b == "50\n"
+
+# ---------- Session 10: try/catch ----------
+
+def test_diff_try_no_error():
+    assert_same('try { print("ok"); } catch e { print("caught"); }')
+
+
+def test_diff_try_catch_error():
+    assert_same('try { let x = 1 / 0; } catch e { print(e); }')
+
+
+def test_diff_throw_caught():
+    assert_same('try { throw "boom"; } catch e { print(e); }')
+
+
+def test_diff_throw_uncaught():
+    assert_same_error('throw "boom";')
+
+
+def test_diff_nested_try():
+    assert_same(
+        'try {'
+        '  try { throw "inner"; } catch e { throw "outer: " + e; }'
+        '} catch e { print(e); }'
+    )
+
+
+def test_diff_return_through_try():
+    src = (
+        'fn f() -> num {'
+        '  try { return 1; } catch e { return 2; }'
+        '}'
+        'print(f());'
+    )
+    assert assert_same(src) == "1\n"
+
+
+def test_diff_break_through_try():
+    src = (
+        'let i = 0;'
+        'while true {'
+        '  try { break; } catch e { print("caught"); }'
+        '  i = i + 1;'
+        '}'
+        'print(i);'
+    )
+    assert assert_same(src) == "0\n"
+
+
+# ---------- Session 10: maps ----------
+
+def test_diff_map_literal():
+    a = _run_interp('print({"a": 1, "b": 2});')
+    b = _run_vm('print({"a": 1, "b": 2});')
+    assert a == b
+
+
+def test_diff_map_get_set():
+    assert_same('let m = {}; m["a"] = 1; print(m["a"]);')
+
+
+def test_diff_map_missing_key():
+    assert_same_error('let m = {"a": 1}; print(m["z"]);')
+
+
+def test_diff_map_len_keys():
+    assert_same('print(len({"a": 1, "b": 2})); print(keys({"a": 1, "b": 2}));')
+
+
+def test_diff_map_contains():
+    assert_same('print(contains({"a": 1}, "a"));')
+
+
+# ---------- Session 10: for loop ----------
+
+def test_diff_for_array():
+    assert assert_same('for x in [1, 2, 3] { print(x); }') == "1\n2\n3\n"
+
+
+def test_diff_for_string():
+    assert assert_same('for c in "abc" { print(c); }') == "a\nb\nc\n"
+
+
+def test_diff_for_map():
+    assert_same('for k in {"a": 1, "b": 2} { print(k); }')
+
+
+def test_diff_for_break():
+    assert_same('for x in [1, 2, 3, 4] { if x > 2 { break; } print(x); }')
+
+
+def test_diff_for_continue():
+    assert_same('for x in [1, 2, 3, 4] { if x % 2 == 0 { continue; } print(x); }')
+
+
+def test_diff_for_nested():
+    assert_same('for i in [1, 2] { for j in [10, 20] { print(str(i) + str(j)); } }')
+
+
+def test_diff_for_empty():
+    assert_same('for x in [] { print(x); } print("done");')
+
+
+def test_diff_for_break_in_try():
+    src = (
+        'for x in [1, 2, 3] {'
+        '  try { if x == 2 { break; } } catch e { }'
+        '  print(x);'
+        '}'
+        'print("done");'
+    )
+    assert assert_same(src) == "1\ndone\n"
+
+def test_diff_else_if_chain():
+    src = (
+        'let x = 3;'
+        'if x == 1 { print("one"); }'
+        'else if x == 2 { print("two"); }'
+        'else if x == 3 { print("three"); }'
+        'else { print("other"); }'
+    )
+    assert assert_same(src) == "three\n"
+
+
+def test_diff_else_if_fallthrough():
+    src = (
+        'let x = 99;'
+        'if x == 1 { print("one"); }'
+        'else if x == 2 { print("two"); }'
+        'else { print("other"); }'
+    )
+    assert assert_same(src) == "other\n"

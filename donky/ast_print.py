@@ -68,5 +68,22 @@ def show(node, indent: int = 0) -> str:
             return (f"{pad}IndexSet({name})\n"
                     + show(idx, indent + 1) + "\n"
                     + show(val, indent + 1))
+        case ast.MapLit(entries):
+            if not entries:
+                return f"{pad}MapLit({{}})"
+            lines = [f"{pad}MapLit"]
+            for k, v in entries:
+                lines.append(show(k, indent + 1) + " : " + show(v, indent + 1))
+            return "\n".join(lines)
+        case ast.ForStmt(var_name, iter_expr, body):
+            return (f"{pad}For({var_name})\n"
+                    + show(iter_expr, indent + 1) + "\n"
+                    + show(body, indent + 1))
+        case ast.TryStmt(body, err_name, handler):
+            return (f"{pad}Try(catch {err_name})\n"
+                    + show(body, indent + 1) + "\n"
+                    + show(handler, indent + 1))
+        case ast.ThrowStmt(value):
+            return f"{pad}Throw\n" + show(value, indent + 1)
         case _:
             return f"{pad}?? {node!r}"

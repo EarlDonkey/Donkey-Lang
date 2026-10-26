@@ -633,3 +633,206 @@ def test_break_finds_early(capsys):
         "print(found);"
     )
     assert capsys.readouterr().out == "15\n"
+
+# ---------- Session 10: try/catch ----------
+
+def test_try_no_error(capsys):
+    run_src('try { print("ok"); } catch e { print("caught"); }')
+    assert capsys.readouterr().out == "ok\n"
+
+
+def test_try_catches_error(capsys):
+    run_src('try { let x = 1 / 0; } catch e { print(e); }')
+    assert capsys.readouterr().out == "division by zero\n"
+
+
+def test_throw_caught(capsys):
+    run_src('try { throw "boom"; } catch e { print(e); }')
+    assert capsys.readouterr().out == "boom\n"
+
+
+def test_throw_uncaught():
+    with pytest.raises(DonkyRuntimeError):
+        run_src('throw "boom";')
+
+
+def test_error_in_handler_propagates():
+    with pytest.raises(DonkyRuntimeError):
+        run_src('try { let x = 1 / 0; } catch e { let y = 1 / 0; }')
+
+
+def test_return_through_try(capsys):
+    run_src(
+        'fn f() -> num {'
+        '  try { return 1; } catch e { return 2; }'
+        '}'
+        'print(f());'
+    )
+    assert capsys.readouterr().out == "1\n"
+
+
+def test_break_through_try(capsys):
+    run_src(
+        'let i = 0;'
+        'while true {'
+        '  try { break; } catch e { print("caught"); }'
+        '  i = i + 1;'
+        '}'
+        'print(i);'
+    )
+    assert capsys.readouterr().out == "0\n"
+
+
+def test_try_nested(capsys):
+    run_src(
+        'try {'
+        '  try { throw "inner"; } catch e { throw "outer: " + e; }'
+        '} catch e { print(e); }'
+    )
+    assert capsys.readouterr().out == "outer: inner\n"
+
+
+# ---------- Session 10: maps ----------
+
+def test_map_literal(capsys):
+    run_src('print({"a": 1, "b": 2});')
+    out = capsys.readouterr().out
+    assert "a: 1" in out and "b: 2" in out
+
+
+def test_map_empty(capsys):
+    run_src("print({});")
+    assert capsys.readouterr().out == "{}\n"
+
+
+def test_map_get(capsys):
+    run_src('let m = {"x": 42}; print(m["x"]);')
+    assert capsys.readouterr().out == "42\n"
+
+
+def test_map_set(capsys):
+    run_src('let m = {}; m["a"] = 1; print(m["a"]);')
+    assert capsys.readouterr().out == "1\n"
+
+
+def test_map_missing_key():
+    with pytest.raises(DonkyRuntimeError):
+        run_src('let m = {"a": 1}; print(m["z"]);')
+
+
+def test_map_int_keys(capsys):
+    run_src('let m = {1: "one", 2: "two"}; print(m[1]);')
+    assert capsys.readouterr().out == "one\n"
+
+
+def test_map_len(capsys):
+    run_src('print(len({"a": 1, "b": 2, "c": 3}));')
+    assert capsys.readouterr().out == "3\n"
+
+
+def test_map_keys(capsys):
+    run_src('print(keys({"a": 1, "b": 2}));')
+    assert capsys.readouterr().out == "[a, b]\n"
+
+
+def test_map_contains(capsys):
+    run_src('let m = {"a": 1}; print(contains(m, "a")); print(contains(m, "z"));')
+    assert capsys.readouterr().out == "true\nfalse\n"
+
+
+def test_map_type(capsys):
+    run_src('print(type({}));')
+    assert capsys.readouterr().out == "map\n"
+
+
+# ---------- Session 10: for loop ----------
+
+def test_for_array(capsys):
+    run_src('for x in [1, 2, 3] { print(x); }')
+    assert capsys.readouterr().out == "1\n2\n3\n"
+
+
+def test_for_string(capsys):
+    run_src('for c in "abc" { print(c); }')
+    assert capsys.readouterr().out == "a\nb\nc\n"
+
+
+def test_for_map(capsys):
+    run_src('for k in {"a": 1, "b": 2} { print(k); }')
+    assert capsys.readouterr().out == "a\nb\n"
+
+
+def test_for_empty(capsys):
+    run_src('for x in [] { print(x); } print("done");')
+    assert capsys.readouterr().out == "done\n"
+
+
+def test_for_break(capsys):
+    run_src(
+        'for x in [1, 2, 3, 4, 5] {'
+        '  if x > 3 { break; }'
+        '  print(x);'
+        '}'
+    )
+    assert capsys.readouterr().out == "1\n2\n3\n"
+
+
+def test_for_continue(capsys):
+    run_src(
+        'for x in [1, 2, 3, 4, 5] {'
+        '  if x % 2 == 0 { continue; }'
+        '  print(x);'
+        '}'
+    )
+    assert capsys.readouterr().out == "1\n3\n5\n"
+
+
+def test_for_nested(capsys):
+    run_src('for i in [1, 2] { for j in [10, 20] { print(str(i) + "-" + str(j)); } }')
+    assert capsys.readouterr().out == "1-10\n1-20\n2-10\n2-20\n"
+
+
+def test_for_non_iterable():
+    with pytest.raises(DonkyRuntimeError):
+        run_src("for x in 5 { print(x); }")
+
+
+def test_for_break_inside_try(capsys):
+    run_src(
+        'for x in [1, 2, 3] {'
+        '  try { if x == 2 { break; } } catch e { }'
+        '  print(x);'
+        '}'
+        'print("done");'
+    )
+    assert capsys.readouterr().out == "1\ndone\n"
+
+def test_else_if_first(capsys):
+    run_src('if true { print("a"); } else if true { print("b"); }')
+    assert capsys.readouterr().out == "a\n"
+
+
+def test_else_if_second(capsys):
+    run_src('if false { print("a"); } else if true { print("b"); }')
+    assert capsys.readouterr().out == "b\n"
+
+
+def test_else_if_chain_third(capsys):
+    run_src(
+        'let x = 3;'
+        'if x == 1 { print("one"); }'
+        'else if x == 2 { print("two"); }'
+        'else if x == 3 { print("three"); }'
+        'else { print("other"); }'
+    )
+    assert capsys.readouterr().out == "three\n"
+
+
+def test_else_if_fallthrough(capsys):
+    run_src(
+        'let x = 99;'
+        'if x == 1 { print("one"); }'
+        'else if x == 2 { print("two"); }'
+        'else { print("other"); }'
+    )
+    assert capsys.readouterr().out == "other\n"

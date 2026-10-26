@@ -26,8 +26,6 @@ class Interpreter:
         self.env = self.globals
         install_builtins(self.globals, args)
 
-    # ---------- entry ----------
-
     def run(self, program: ast.Program) -> None:
         for stmt in program.stmts:
             try:
@@ -35,11 +33,7 @@ class Interpreter:
             except ReturnSignal:
                 raise self._err(stmt, "'return' outside of a function")
             except (BreakSignal, ContinueSignal):
-                raise self._err(
-                    stmt, "'break'/'continue' outside of a loop"
-                )
-
-    # ---------- statements ----------
+                raise self._err(stmt, "'break'/'continue' outside of a loop")
 
     def exec_stmt(self, stmt: ast.Stmt) -> None:
         match stmt:
@@ -62,6 +56,41 @@ class Interpreter:
                         break
                     except ContinueSignal:
                         pass
+            case ast.ForStmt(var_name, iter_expr, body, line, col):
+                container = self.eval_expr(iter_expr)
+                items = self._iterable(container, stmt)
+                for item in items:
+                    saved = self.env
+                    self.env = Environment(parent=saved)
+                    try:
+                        self.env.define(var_name, item)
+                        try:
+                            for s in body.stmts:
+                                self.exec_stmt(s)
+                        except ContinueSignal:
+                            pass
+                        except BreakSignal:
+                            break
+                    finally:
+                        self.env = saved
+            case ast.TryStmt(body, err_name, handler, line, col):
+                try:
+                    self.exec_block(body)
+                except DonkyRuntimeError as e:
+                    saved = self.env
+                    self.env = Environment(parent=saved)
+                    try:
+                        self.env.define(err_name, e.message)
+                        self.exec_block(handler)
+                    finally:
+                        self.env = saved
+            case ast.ThrowStmt(value, line, col):
+                msg = self.eval_expr(value)
+                if not isinstance(msg, str):
+                    raise self._err(
+                        stmt, f"throw expects string, got {type_name(msg)}"
+                    )
+                raise self._err(stmt, msg)
             case ast.FnStmt(name, params, ret, body, line, col):
                 self.env.define(name, Function(name, params, body, self.env, ret))
             case ast.ReturnStmt(value, line, col):
@@ -75,18 +104,21 @@ class Interpreter:
                 self.exec_block(stmt)
             case ast.IndexSet(name, index_expr, value_expr, line, col):
                 try:
-                    array = self.env.get(name)
+                    container = self.env.get(name)
                 except DonkyRuntimeError:
                     raise self._err(stmt, f"undefined variable '{name}'")
-                if isinstance(array, str):
+                if isinstance(container, str):
                     raise self._err(
                         stmt,
                         "cannot assign to string index (strings are immutable)",
                     )
                 index = self.eval_expr(index_expr)
                 value = self.eval_expr(value_expr)
-                self._check_index(array, index, stmt)
-                array[index] = value
+                if isinstance(container, dict):
+                    container[index] = value
+                else:
+                    self._check_index(container, index, stmt)
+                    container[index] = value
             case _:
                 raise DonkyRuntimeError(f"cannot execute {type(stmt).__name__}")
 
@@ -99,7 +131,16 @@ class Interpreter:
         finally:
             self.env = saved
 
-    # ---------- expressions ----------
+    def _iterable(self, container: object, node: object) -> list:
+        if isinstance(container, list):
+            return list(container)
+        if isinstance(container, str):
+            return list(container)
+        if isinstance(container, dict):
+            return list(container.keys())
+        raise self._err(
+            node, f"cannot iterate {type_name(container)}"
+        )
 
     def eval_expr(self, expr: ast.Expr) -> object:
         match expr:
@@ -161,11 +202,24 @@ class Interpreter:
                 return self.call_function(fn, argvals, expr)
             case ast.ArrayLit(elems, line, col):
                 return [self.eval_expr(e) for e in elems]
-            case ast.Index(array_expr, index_expr, line, col):
-                array = self.eval_expr(array_expr)
+            case ast.MapLit(entries, line, col):
+                result = {}
+                for k_expr, v_expr in entries:
+                    k = self.eval_expr(k_expr)
+                    v = self.eval_expr(v_expr)
+                    result[k] = v
+                return result
+            case ast.Index(container_expr, index_expr, line, col):
+                container = self.eval_expr(container_expr)
                 index = self.eval_expr(index_expr)
-                self._check_index(array, index, expr)
-                return array[index]
+                if isinstance(container, dict):
+                    if index not in container:
+                        raise self._err(
+                            expr, f"key {format_value(index)!r} not in map"
+                        )
+                    return container[index]
+                self._check_index(container, index, expr)
+                return container[index]
             case _:
                 raise DonkyRuntimeError(f"cannot evaluate {type(expr).__name__}")
 
@@ -263,8 +317,6 @@ class Interpreter:
             return left >= right
         raise DonkyRuntimeError(f"unknown operator '{op}'")
 
-    # ---------- calls ----------
-
     def call_function(self, fn: Function, args: list[object],
                       node: ast.Expr) -> object:
         if len(args) != len(fn.params):
@@ -303,8 +355,6 @@ class Interpreter:
             if e.line == 0:
                 raise self._err(node, e.message) from None
             raise
-
-    # ---------- helpers ----------
 
     def _require_bool(self, v: object, node: object) -> bool:
         if not isinstance(v, bool):

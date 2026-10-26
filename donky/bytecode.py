@@ -4,25 +4,19 @@ from enum import Enum, auto
 
 
 class Op(Enum):
-    # push
-    CONST = auto()            # CONST idx  → push constants[idx]
+    CONST = auto()
     TRUE = auto()
     FALSE = auto()
-    # discard
     POP = auto()
-    # locals
     LOAD_LOCAL = auto()
     STORE_LOCAL = auto()
-    # upvalues (closures)
-    LOAD_UPVALUE = auto()     # LOAD_UPVALUE i  → push closure.upvalues[i].value
-    STORE_UPVALUE = auto()    # STORE_UPVALUE i → pop, closure.upvalues[i].value = v
-    CAPTURE_LOCAL = auto()    # CAPTURE_LOCAL slot  → push frame.slots[slot] (the Cell)
-    CAPTURE_UPVALUE = auto()  # CAPTURE_UPVALUE i    → push frame.closure.upvalues[i] (the Cell)
-    # globals
+    LOAD_UPVALUE = auto()
+    STORE_UPVALUE = auto()
+    CAPTURE_LOCAL = auto()
+    CAPTURE_UPVALUE = auto()
     DEFINE_GLOBAL = auto()
     LOAD_GLOBAL = auto()
     STORE_GLOBAL = auto()
-    # arithmetic
     ADD = auto()
     SUB = auto()
     MUL = auto()
@@ -30,35 +24,35 @@ class Op(Enum):
     MOD = auto()
     FLOOR_DIV = auto()
     NEG = auto()
-    # logic
     NOT = auto()
-    # comparison
     EQ = auto()
     NE = auto()
     LT = auto()
     LE = auto()
     GT = auto()
     GE = auto()
-    # control
     JUMP = auto()
     JUMP_IF_FALSE = auto()
     JUMP_IF_FALSE_PEEK = auto()
     JUMP_IF_TRUE_PEEK = auto()
-    # functions
-    CLOSURE = auto()          # CLOSURE idx, n_upvals → pop n cells, push Closure
-    CALL = auto()             # CALL argc name
+    CLOSURE = auto()
+    CALL = auto()
     RETURN = auto()
-    # I/O
     PRINT = auto()
-    # arrays
     NEW_ARRAY = auto()
+    NEW_MAP = auto()
+    NEW_ITER = auto()
+    ITER_NEXT = auto()
     INDEX_GET = auto()
     INDEX_SET = auto()
+    PUSH_TRY = auto()
+    POP_TRY = auto()
+    THROW = auto()
 
 
 @dataclass
 class UpvalueDesc:
-    from_parent_local: bool   # True = capture parent's local slot; False = parent's upvalue
+    from_parent_local: bool
     index: int
 
 
@@ -120,10 +114,11 @@ def _jump_targets(instructions: list[tuple]) -> set[int]:
     jump_ops = {
         Op.JUMP, Op.JUMP_IF_FALSE,
         Op.JUMP_IF_FALSE_PEEK, Op.JUMP_IF_TRUE_PEEK,
+        Op.PUSH_TRY, Op.ITER_NEXT,
     }
     targets: set[int] = set()
     for instr in instructions:
-        if instr[0] in jump_ops and len(instr) == 2:
+        if instr[0] in jump_ops and len(instr) >= 2:
             targets.add(instr[1])
     return targets
 
@@ -144,6 +139,7 @@ def _format_instr(instr: tuple) -> str:
     if op in (Op.LOAD_GLOBAL, Op.STORE_GLOBAL, Op.DEFINE_GLOBAL):
         return f"{op.name:<18} {arg!r}"
     if op in (Op.JUMP, Op.JUMP_IF_FALSE,
-              Op.JUMP_IF_FALSE_PEEK, Op.JUMP_IF_TRUE_PEEK):
+              Op.JUMP_IF_FALSE_PEEK, Op.JUMP_IF_TRUE_PEEK,
+              Op.PUSH_TRY, Op.ITER_NEXT):
         return f"{op.name:<18} -> L{arg}"
     return f"{op.name:<18} {arg}"

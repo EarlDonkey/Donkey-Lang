@@ -24,8 +24,6 @@ class Parser:
         self.pos = 0
         self.loop_depth = 0
 
-    # ---------- cursor ----------
-
     def _peek(self) -> Token:
         return self.tokens[self.pos]
 
@@ -53,7 +51,7 @@ class Parser:
         tok = self._peek()
         raise ParseError(f"expected {what}, got {tok.type.name} ({tok.lexeme!r})", tok)
 
-    # ---------- expressions (Pratt) ----------
+    # ---------- expressions ----------
 
     def parse_expr(self, min_bp: int = 0) -> ast.Expr:
         left = self.parse_prefix()
@@ -95,6 +93,18 @@ class Parser:
                         elems.append(self.parse_expr(0))
                 self._expect(TokenType.RBRACKET, "']'")
                 expr = ast.ArrayLit(elems, tok.line, tok.col)
+            case TokenType.LBRACE:
+                entries: list[tuple[ast.Expr, ast.Expr]] = []
+                if not self._check(TokenType.RBRACE):
+                    while True:
+                        k = self.parse_expr(0)
+                        self._expect(TokenType.COLON, "':' in map literal")
+                        v = self.parse_expr(0)
+                        entries.append((k, v))
+                        if not self._match(TokenType.COMMA):
+                            break
+                self._expect(TokenType.RBRACE, "'}'")
+                expr = ast.MapLit(entries, tok.line, tok.col)
             case TokenType.IDENT:
                 if self._check(TokenType.LPAREN):
                     self._advance()
@@ -134,10 +144,13 @@ class Parser:
         if self._check(TokenType.PRINT):    return self.parse_print()
         if self._check(TokenType.IF):       return self.parse_if()
         if self._check(TokenType.WHILE):    return self.parse_while()
+        if self._check(TokenType.FOR):      return self.parse_for()
         if self._check(TokenType.FN):       return self.parse_fn()
         if self._check(TokenType.RETURN):   return self.parse_return()
         if self._check(TokenType.BREAK):    return self.parse_break()
         if self._check(TokenType.CONTINUE): return self.parse_continue()
+        if self._check(TokenType.TRY):      return self.parse_try()
+        if self._check(TokenType.THROW):    return self.parse_throw()
         if self._check(TokenType.LBRACE):   return self.parse_block()
         return self.parse_expr_stmt()
 
@@ -187,13 +200,35 @@ class Parser:
         self._expect(TokenType.SEMI, "';' after continue")
         return ast.ContinueStmt(tok.line, tok.col)
 
+    def parse_throw(self) -> ast.ThrowStmt:
+        tok = self._advance()
+        value = self.parse_expr()
+        self._expect(TokenType.SEMI, "';' after throw")
+        return ast.ThrowStmt(value, tok.line, tok.col)
+
+    def parse_try(self) -> ast.TryStmt:
+        tok = self._advance()
+        self._push_loop_saved = self.loop_depth
+        try:
+            body = self.parse_block()
+        finally:
+            self.loop_depth = self._push_loop_saved
+        self._expect(TokenType.CATCH, "'catch' after try block")
+        err_name = self._expect(TokenType.IDENT, "error variable name")
+        handler = self.parse_block()
+        return ast.TryStmt(body, err_name.lexeme, handler, tok.line, tok.col)
+
     def parse_if(self) -> ast.IfStmt:
         tok = self._advance()
         cond = self.parse_expr()
         then = self.parse_block()
         else_ = None
         if self._match(TokenType.ELSE):
-            else_ = self.parse_block()
+            if self._check(TokenType.IF):
+                nested = self.parse_if()
+                else_ = ast.Block([nested], nested.line, nested.col)
+            else:
+                else_ = self.parse_block()
         return ast.IfStmt(cond, then, else_, tok.line, tok.col)
 
     def parse_while(self) -> ast.WhileStmt:
@@ -205,6 +240,18 @@ class Parser:
         finally:
             self.loop_depth -= 1
         return ast.WhileStmt(cond, body, tok.line, tok.col)
+
+    def parse_for(self) -> ast.ForStmt:
+        tok = self._advance()
+        var = self._expect(TokenType.IDENT, "loop variable after 'for'")
+        self._expect(TokenType.IN, "'in' after for variable")
+        iter_expr = self.parse_expr()
+        self.loop_depth += 1
+        try:
+            body = self.parse_block()
+        finally:
+            self.loop_depth -= 1
+        return ast.ForStmt(var.lexeme, iter_expr, body, tok.line, tok.col)
 
     def parse_fn(self) -> ast.FnStmt:
         tok = self._advance()

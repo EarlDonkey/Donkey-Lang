@@ -1,0 +1,26 @@
+fn safe_div(a, b) -> any {
+    try {
+        return a / b;
+    } catch e {
+        print("caught: " + e);
+        return 0;
+    }
+}
+
+print(safe_div(10, 2));
+print(safe_div(10, 0));
+print(safe_div(10, 5));
+
+try {
+    throw "custom failure";
+} catch e {
+    print("got: " + e);
+}
+
+let arr = [1, 2, 3];
+try {
+    print(arr[99]);
+} catch e {
+    print("index error: " + e);
+}
+print("done");

@@ -3,16 +3,16 @@ from dataclasses import dataclass
 
 
 class TokenType(Enum):
-    # literals
     NUMBER = auto()
     STRING = auto()
     IDENT = auto()
-    # keywords
     LET = auto()
     FN = auto()
     IF = auto()
     ELSE = auto()
     WHILE = auto()
+    FOR = auto()
+    IN = auto()
     RETURN = auto()
     PRINT = auto()
     TRUE = auto()
@@ -20,7 +20,9 @@ class TokenType(Enum):
     DIV = auto()
     BREAK = auto()
     CONTINUE = auto()
-    # operators
+    TRY = auto()
+    CATCH = auto()
+    THROW = auto()
     PLUS = auto()
     MINUS = auto()
     STAR = auto()
@@ -36,7 +38,6 @@ class TokenType(Enum):
     LTEQ = auto()
     GT = auto()
     GTEQ = auto()
-    # punctuation
     LPAREN = auto()
     RPAREN = auto()
     LBRACE = auto()
@@ -45,6 +46,7 @@ class TokenType(Enum):
     RBRACKET = auto()
     SEMI = auto()
     COMMA = auto()
+    COLON = auto()
     EOF = auto()
 
 
@@ -74,6 +76,8 @@ KEYWORDS = {
     "if":       TokenType.IF,
     "else":     TokenType.ELSE,
     "while":    TokenType.WHILE,
+    "for":      TokenType.FOR,
+    "in":       TokenType.IN,
     "return":   TokenType.RETURN,
     "print":    TokenType.PRINT,
     "true":     TokenType.TRUE,
@@ -81,6 +85,9 @@ KEYWORDS = {
     "div":      TokenType.DIV,
     "break":    TokenType.BREAK,
     "continue": TokenType.CONTINUE,
+    "try":      TokenType.TRY,
+    "catch":    TokenType.CATCH,
+    "throw":    TokenType.THROW,
 }
 
 
@@ -148,6 +155,7 @@ class Lexer:
             "{": TokenType.LBRACE, "}": TokenType.RBRACE,
             "[": TokenType.LBRACKET, "]": TokenType.RBRACKET,
             ";": TokenType.SEMI,   ",": TokenType.COMMA,
+            ":": TokenType.COLON,
         }
         if ch in simple:
             return Token(simple[ch], ch, None, line, col)

@@ -149,3 +149,20 @@ def test_break_not_prefix_of_identifier():
     toks = list(Lexer("breakable").tokenize())
     assert toks[0].type == TokenType.IDENT
     assert toks[0].lexeme == "breakable"
+    
+def test_try_catch_keywords():
+    assert types("try")[0] == TokenType.TRY
+    assert types("catch")[0] == TokenType.CATCH
+
+
+def test_for_in_keywords():
+    assert types("for")[0] == TokenType.FOR
+    assert types("in")[0] == TokenType.IN
+
+
+def test_throw_keyword():
+    assert types("throw")[0] == TokenType.THROW
+
+
+def test_colon_token():
+    assert types(":")[0] == TokenType.COLON

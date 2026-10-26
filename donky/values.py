@@ -51,8 +51,6 @@ class Builtin:
 
 
 class Cell:
-    """Mutable box for a single runtime value. Shared by closures so
-    mutations through any closure are visible to all."""
     __slots__ = ("value",)
 
     def __init__(self, value: object = None):
@@ -85,6 +83,8 @@ def type_name(v: object) -> str:
         return "string"
     if isinstance(v, list):
         return "array"
+    if isinstance(v, dict):
+        return "map"
     if isinstance(v, (Function, Builtin, Closure, CodeObject)):
         return "function"
     return type(v).__name__
@@ -103,4 +103,7 @@ def format_value(v: object) -> str:
         return f"<fn {v.name}>"
     if isinstance(v, list):
         return "[" + ", ".join(format_value(e) for e in v) + "]"
+    if isinstance(v, dict):
+        parts = [f"{format_value(k)}: {format_value(val)}" for k, val in v.items()]
+        return "{" + ", ".join(parts) + "}"
     return str(v)
