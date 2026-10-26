@@ -336,6 +336,101 @@ def completion(ls: LanguageServer, params: types.CompletionParams) -> types.Comp
     # so we can just return the whole list.
     return types.CompletionList(is_incomplete=False, items=items)
 
+# ---------------------------------------------------------- Navigation
+
+def _find_definition(program: ast.Program, name: str, current_uri: str, base_dir: str):
+    """Walk the AST looking for the definition. Returns (uri, node)."""
+    found = None
+    
+    def walk(node):
+        nonlocal found
+        if found: return
+        
+        if isinstance(node, ast.LetStmt) and node.name == name:
+            found = node
+        elif isinstance(node, ast.FnStmt) and node.name == name:
+            found = node
+        
+        # Recurse into blocks
+        if isinstance(node, ast.Program):
+            for s in node.stmts: walk(s)
+        elif isinstance(node, ast.Block):
+            for s in node.stmts: walk(s)
+        elif isinstance(node, ast.IfStmt):
+            walk(node.then)
+            if node.else_: walk(node.else_)
+        elif isinstance(node, ast.WhileStmt):
+            walk(node.body)
+        elif isinstance(node, ast.ForStmt):
+            walk(node.body)
+        elif isinstance(node, ast.FnStmt):
+            walk(node.body)
+        elif isinstance(node, ast.TryStmt):
+            walk(node.body)
+            walk(node.handler)
+
+    walk(program)
+    return found
+
+
+@server.feature(types.TEXT_DOCUMENT_DEFINITION)
+def definition(ls: LanguageServer, params: types.DefinitionParams) -> types.Location | None:
+    uri = params.text_document.uri
+    doc = ls.workspace.get_text_document(uri)
+    
+    # We need the unexpanded program to find which module it came from
+    try:
+        tokens = Lexer(doc.source).tokenize()
+        raw_program = Parser(tokens).parse()
+    except Exception:
+        return None
+
+    path = unquote(urlparse(uri).path)
+    base_dir = os.path.dirname(path) if path else os.getcwd()
+    
+    # Check local scope first
+    line = params.position.line + 1
+    col = params.position.character + 1
+    
+    local_node = _find_node_at(raw_program, line, col)
+    if not local_node:
+        return None
+
+    name = local_node.name if isinstance(local_node, ast.Ident) else local_node.callee
+    
+    # Look in the current file
+    defn = _find_definition(raw_program, name, uri, base_dir)
+    target_uri = uri
+    
+    if not defn:
+        # Not in current file. Check imports.
+        for stmt in raw_program.stmts:
+            if isinstance(stmt, ast.ImportStmt):
+                import_path = os.path.abspath(os.path.join(base_dir, stmt.path))
+                if os.path.exists(import_path):
+                    import_uri = "file:///" + import_path.replace("\\", "/")
+                    if import_uri.startswith("file:////"):
+                        import_uri = import_uri.replace("file:////", "file:///")
+                    
+                    import_doc = ls.workspace.get_text_document(import_uri)
+                    if import_doc:
+                        try:
+                            imp_toks = Lexer(import_doc.source).tokenize()
+                            imp_prog = Parser(imp_toks).parse()
+                            defn = _find_definition(imp_prog, name, import_uri, base_dir)
+                            if defn:
+                                target_uri = import_uri
+                                break
+                        except Exception:
+                            pass
+
+    if defn:
+        return types.Location(
+            uri=target_uri,
+            range=_range(defn.line, defn.col, len(name))
+        )
+    return None
+
 
 # ------------------------------------------------------------- lifecycle
 
