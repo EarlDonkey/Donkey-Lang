@@ -1,0 +1,9 @@
+let x = 10;
+let my_variable = "hello";
+
+fn greet(name) -> str {
+    return "Hi, " + name;
+}
+
+print(greet("Alice"));
+

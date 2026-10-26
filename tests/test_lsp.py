@@ -65,3 +65,30 @@ def test_import_error_reported(tmp_path):
     diags = validate(doc.as_uri(), doc.read_text(encoding="utf-8"))
     assert len(diags) == 1
     assert "cannot import" in diags[0].message
+
+from donky_lsp import _find_scope_symbols, _parse, _find_node_at
+
+def test_completion_finds_variables():
+    src = "let x = 1;\nlet y = 2;\n"
+    prog = _parse("file:///x.donk", src)
+    syms = _find_scope_symbols(prog, 3, 1)
+    assert "x" in syms
+    assert "y" in syms
+    assert "len" in syms
+
+def test_completion_finds_function_params():
+    src = "fn add(a, b) -> num {\n  \n  return a + b;\n}\n"
+    prog = _parse("file:///x.donk", src)
+    # Cursor inside the function block, line 2
+    syms = _find_scope_symbols(prog, 2, 1)
+    assert "a" in syms
+    assert "b" in syms
+
+def test_hover_finds_node():
+    src = "let apple = 1;\nprint(apple);"
+    prog = _parse("file:///x.donk", src)
+    # 'apple' in print() starts at line 2, col 7
+    node = _find_node_at(prog, 2, 7)
+    from donky import ast_nodes as ast
+    assert isinstance(node, ast.Ident)
+    assert node.name == "apple"
