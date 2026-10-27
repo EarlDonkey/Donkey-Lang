@@ -1,39 +1,88 @@
-print("Donky OS Shell v1.5");
+print("Donky OS Shell v1.7");
 print_newline();
 print_newline();
 
 let buf = alloc(128);
-let disk = alloc(256);
+let disk_buf = alloc(512); 
+let tx_desc = alloc(4096); 
+let tx_buf = alloc(2048); 
+
+// --- INIT e1000 NETWORK CARD ---
+print("Initializing e1000 at 0xFEB00000...");
+print_newline();
+
+let e1000_base = 0xFEB00000;
+
+print("Initializing TX Ring...");
+print_newline();
+let ctrl = mem_read32(e1000_base + 0);
+mem_write32(e1000_base + 0, ctrl - (ctrl % 32) + (ctrl % 16));
+
+let tctl = 2 + 8 + 256 + 262144;
+mem_write32(e1000_base + 1024, tctl);
+
+mem_write32(e1000_base + 14336, tx_desc); 
+mem_write32(e1000_base + 14340, 0); 
+mem_write32(e1000_base + 14344, 128);
+mem_write32(e1000_base + 14352, 0);
+mem_write32(e1000_base + 14360, 0);
+
+print("Sending packet to host (10.0.2.2)...");
+print_newline();
+
+mem_write32(tx_buf + 0, 305419858); 
+mem_write32(tx_buf + 4, 1465263122); 
+mem_write32(tx_buf + 8, 134217728); 
+
+str_copy(tx_buf + 14, "Hello from Donky e1000!");
+
+mem_write32(tx_desc + 0, tx_buf);
+mem_write32(tx_desc + 4, 0);
+mem_write32(tx_desc + 8, 36 + 184549376);
+
+mem_write32(e1000_base + 14360, 1);
+print("Packet sent! Check Wireshark.");
+print_newline();
+
+print_newline();
+print("Donky OS Shell v1.7 (DonkyFS)");
+print_newline();
 
 while 1 == 1 {
     print("donky> ");
     read_line(buf);
 
     if str_eq(buf, "help") == 1 {
-        print("Commands: help, clear, about, mem, echo <text>, reboot, shutdown, save <text>, load");
+        print("Commands: help, clear, about, net, ls, mkfs, reboot, shutdown");
+        print_newline();
+    } else if str_eq(buf, "net") == 1 {
+        print("See network output above.");
         print_newline();
     } else if str_eq(buf, "clear") == 1 {
         clear_screen();
-        print("Donky OS Shell v1.5");
+        print("Donky OS Shell v1.7");
         print_newline();
-    } else if str_eq(buf, "about") == 1 {
-        print("Donky OS - The Native Language");
+    } else if str_eq(buf, "ls") == 1 {
+        print("Reading directory from Sector 1...");
         print_newline();
-    } else if str_eq(buf, "mem") == 1 {
-        print("Current Heap Pointer: ");
-        print_int(get_heap());
+        disk_read(1, disk_buf);
+        print_str(disk_buf);
         print_newline();
-    } else if str_starts_with(buf, "echo ") == 1 {
-        print("Echo: ");
-        print_str(str_skip(buf, 5));
+    } else if str_starts_with(buf, "touch ") == 1 {
+        let fname = str_skip(buf, 6);
+        print("Creating empty file: ");
+        print_str(fname);
+        disk_read(1, disk_buf);
+        str_copy(disk_buf + 10, fname);
+        disk_write(1, disk_buf);
         print_newline();
-    } else if str_starts_with(buf, "save ") == 1 {
-        str_copy(disk, str_skip(buf, 5));
-        print("Saved to RAM disk.");
-        print_newline();
-    } else if str_eq(buf, "load") == 1 {
-        print("RAM Disk: ");
-        print_str(disk);
+    } else if str_eq(buf, "mkfs") == 1 {
+        print("Formatting...");
+        let i = 0;
+        while i < 512 { mem_write32(disk_buf + i, 0); i = i + 4; }
+        str_copy(disk_buf, "file1.txt (0 bytes)\n");
+        disk_write(1, disk_buf);
+        print("Formatted Sector 1.");
         print_newline();
     } else if str_eq(buf, "reboot") == 1 {
         print("Rebooting...");
@@ -42,8 +91,7 @@ while 1 == 1 {
         print("Shutting down...");
         shutdown();
     } else {
-        print("Unknown command: ");
-        print_str(buf);
+        print("Unknown command.");
         print_newline();
     }
 }

@@ -1,0 +1,23 @@
+print("Starting SEB Patcher...");
+let seb_path = "C:\\Program Files\\SafeExamBrowser\\Application\\";
+
+if !file_exists(seb_path) {
+    print("Safe Exam Browser is not installed at " + seb_path);
+} else {
+    print("Extracting patched files to " + seb_path);
+    
+    // We assume you renamed your compiled SEB zip to "patch.zip" and put it next to this script
+    let zip_file = "patch.zip";
+    
+    if !file_exists(zip_file) {
+        print("Error: Could not find " + zip_file);
+    } else {
+        try {
+            extract_zip(zip_file, seb_path);
+            print("PATCH SUCCESSFUL!");
+            print("SEB has been modified.");
+        } catch (err) {
+            print("ERROR: " + err);
+        }
+    }
+}

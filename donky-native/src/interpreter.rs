@@ -346,6 +346,32 @@ impl Interpreter {
                 }
             }
             Expr::Call(name, args) => {
+                if name == "extract_zip" {
+                    let zip_path = self.evaluate(args[0].clone())?.to_string();
+                    let dest_path = self.evaluate(args[1].clone())?.to_string();
+                    
+                    let file = fs::File::open(&zip_path).map_err(|e| format!("Failed to open zip: {}", e))?;
+                    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Failed to read zip: {}", e))?;
+                    
+                    for i in 0..archive.len() {
+                        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+                        let outpath = match file.enclosed_name() {
+                            Some(path) => Path::new(&dest_path).join(path),
+                            None => continue,
+                        };
+                        
+                        if (*file.name()).ends_with('/') {
+                            fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+                        } else {
+                            if let Some(p) = outpath.parent() {
+                                if !p.exists() { fs::create_dir_all(&p).map_err(|e| e.to_string())?; }
+                            }
+                            let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+                            std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+                        }
+                    }
+                    return Ok(Value::Null);
+                }
                 if name == "tcp_listen" {
                     let p = self.evaluate(args[0].clone())?;
                     if let Value::Number(port) = p {
