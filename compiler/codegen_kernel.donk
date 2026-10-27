@@ -85,7 +85,6 @@ fn gen_expr(state, node) -> void {
         if name == "print_newline" { emit(state, "    call print_newline"); }
         else if name == "clear_screen" { emit(state, "    call clear_screen"); }
         else if name == "read_line" { if len(args) > 0 { gen_expr(state, args[0]); } emit(state, "    mov rdi, rax"); emit(state, "    call read_line"); }
-        else if name == "get_heap" { emit(state, "    call get_heap"); }
         else if name == "reboot" { emit(state, "    call reboot"); }
         else if name == "shutdown" { emit(state, "    call shutdown"); }
         else if name == "disk_read" { 
@@ -100,29 +99,33 @@ fn gen_expr(state, node) -> void {
                 gen_expr(state, args[1]); emit(state, "    mov rsi, rax"); emit(state, "    pop rdi"); emit(state, "    call disk_write");
             }
         }
-        else if name == "mem_read32" { 
-            if len(args) > 0 { gen_expr(state, args[0]); }
-            emit(state, "    mov rdi, rax"); emit(state, "    call mem_read32");
+        else if name == "str_eq" { 
+            if len(args) > 1 {
+                gen_expr(state, args[0]); emit(state, "    push rax");
+                gen_expr(state, args[1]); emit(state, "    mov rsi, rax"); emit(state, "    pop rdi"); emit(state, "    call str_eq");
+            }
         }
-        else if name == "mem_read16" { 
-            if len(args) > 0 { gen_expr(state, args[0]); }
-            emit(state, "    mov rdi, rax"); emit(state, "    call mem_read16");
+        else if name == "str_starts_with" { 
+            if len(args) > 1 {
+                gen_expr(state, args[0]); emit(state, "    push rax");
+                gen_expr(state, args[1]); emit(state, "    mov rsi, rax"); emit(state, "    pop rdi"); emit(state, "    call str_starts_with");
+            }
+        }
+        else if name == "str_skip" { 
+            if len(args) > 1 {
+                gen_expr(state, args[0]); emit(state, "    push rax");
+                gen_expr(state, args[1]); emit(state, "    mov rsi, rax"); emit(state, "    pop rdi"); emit(state, "    call str_skip");
+            }
+        }
+        else if name == "str_copy" { 
+            if len(args) > 1 {
+                gen_expr(state, args[0]); emit(state, "    push rax");
+                gen_expr(state, args[1]); emit(state, "    mov rsi, rax"); emit(state, "    pop rdi"); emit(state, "    call str_copy");
+            }
         }
         else if name == "mem_read8" { 
             if len(args) > 0 { gen_expr(state, args[0]); }
             emit(state, "    mov rdi, rax"); emit(state, "    call mem_read8");
-        }
-        else if name == "mem_write32" { 
-            if len(args) > 1 {
-                gen_expr(state, args[0]); emit(state, "    push rax");
-                gen_expr(state, args[1]); emit(state, "    mov rsi, rax"); emit(state, "    pop rdi"); emit(state, "    call mem_write32");
-            }
-        }
-        else if name == "mem_write16" { 
-            if len(args) > 1 {
-                gen_expr(state, args[0]); emit(state, "    push rax");
-                gen_expr(state, args[1]); emit(state, "    mov rsi, rax"); emit(state, "    pop rdi"); emit(state, "    call mem_write16");
-            }
         }
         else if name == "mem_write8" { 
             if len(args) > 1 {
@@ -130,7 +133,6 @@ fn gen_expr(state, node) -> void {
                 gen_expr(state, args[1]); emit(state, "    mov rsi, rax"); emit(state, "    pop rdi"); emit(state, "    call mem_write8");
             }
         }
-        else if name == "print_hex" { if len(args) > 0 { gen_expr(state, args[0]); } emit(state, "    mov rdi, rax"); emit(state, "    call print_hex"); }
         else if name == "print_str" { if len(args) > 0 { gen_expr(state, args[0]); } emit(state, "    mov rdi, rax"); emit(state, "    call print_str"); }
         else if name == "print_int" { if len(args) > 0 { gen_expr(state, args[0]); } emit(state, "    mov rdi, rax"); emit(state, "    call print_int"); }
         else if name == "alloc" { if len(args) > 0 { gen_expr(state, args[0]); } emit(state, "    mov rdi, rax"); emit(state, "    call alloc"); }
@@ -222,7 +224,6 @@ fn compile_to_kernel(ast) -> str {
     emit(state, ".halt:\n    hlt\n    jmp .halt\n");
     
     emit(state, "print_int:\n    push rax\n    push rbx\n    push rcx\n    push rdx\n    push r8\n    push r9\n    mov rax, rdi\n    mov rbx, 10\n    xor rcx, rcx\n.int_div:\n    xor rdx, rdx\n    div rbx\n    add dl, '0'\n    push rdx\n    inc rcx\n    test rax, rax\n    jnz .int_div\n.int_print:\n    pop rdx\n    mov r8d, [rel vga_cursor]\n    lea r9, [0xb8000 + r8]\n    mov [r9], dl\n    mov byte [r9+1], 0x0f\n    add r8, 2\n    mov [rel vga_cursor], r8d\n    dec rcx\n    jnz .int_print\n    pop r9\n    pop r8\n    pop rdx\n    pop rcx\n    pop rbx\n    pop rax\n    ret\n");
-    emit(state, "print_hex:\n    push rax\n    push rbx\n    push rcx\n    push rdx\n    push r8\n    push r9\n    mov rax, rdi\n    mov rbx, 16\n    xor rcx, rcx\n.hex_div:\n    xor rdx, rdx\n    div rbx\n    cmp dl, 10\n    jl .hex_num\n    add dl, 39\n.hex_num:\n    add dl, '0'\n    push rdx\n    inc rcx\n    test rax, rax\n    jnz .hex_div\n.hex_print:\n    pop rdx\n    mov r8d, [rel vga_cursor]\n    lea r9, [0xb8000 + r8]\n    mov [r9], dl\n    mov byte [r9+1], 0x0f\n    add r8, 2\n    mov [rel vga_cursor], r8d\n    dec rcx\n    jnz .hex_print\n    pop r9\n    pop r8\n    pop rdx\n    pop rcx\n    pop rbx\n    pop rax\n    ret\n");
     emit(state, "print_str:\n    push rax\n    push r8\n    push r9\n.str_loop:\n    mov al, [rdi]\n    test al, al\n    jz .str_done\n    mov r8d, [rel vga_cursor]\n    lea r9, [0xb8000 + r8]\n    mov [r9], al\n    mov byte [r9+1], 0x0f\n    add r8d, 2\n    mov [rel vga_cursor], r8d\n    inc rdi\n    jmp .str_loop\n.str_done:\n    pop r9\n    pop r8\n    pop rax\n    ret\n");
     emit(state, "print_char:\n    cmp dil, 8\n    jne .normal_char\n    sub dword [rel vga_cursor], 2\n    mov r8d, [rel vga_cursor]\n    lea r9, [0xb8000 + r8]\n    mov byte [r9], ' '\n    mov byte [r9+1], 0x0f\n    ret\n.normal_char:\n    mov r8d, [rel vga_cursor]\n    lea r9, [0xb8000 + r8]\n    mov [r9], dil\n    mov byte [r9+1], 0x0f\n    add r8d, 2\n    mov [rel vga_cursor], r8d\n    ret\n");
     emit(state, "print_newline:\n    push rax\n    push rbx\n    push rcx\n    push rdx\n    push r8\n    mov r8d, [rel vga_cursor]\n    mov eax, r8d\n    xor edx, edx\n    mov ecx, 160\n    div ecx\n    inc eax\n    mul ecx\n    mov [rel vga_cursor], eax\n    pop r8\n    pop rdx\n    pop rcx\n    pop rbx\n    pop rax\n    ret\n");
@@ -232,22 +233,21 @@ fn compile_to_kernel(ast) -> str {
     emit(state, "str_starts_with:\n    push rbx\n.loop_ss:\n    mov al, [rsi]\n    test al, al\n    jz .yes_ss\n    mov bl, [rdi]\n    cmp al, bl\n    jne .no_ss\n    inc rdi\n    inc rsi\n    jmp .loop_ss\n.yes_ss:\n    mov rax, 1\n    pop rbx\n    ret\n.no_ss:\n    mov rax, 0\n    pop rbx\n    ret\n");
     emit(state, "str_skip:\n    mov rax, rdi\n.skip_loop:\n    test rsi, rsi\n    jz .skip_done\n    inc rax\n    dec rsi\n    jmp .skip_loop\n.skip_done:\n    ret\n");
     emit(state, "str_copy:\n    push rax\n.copy_loop:\n    mov al, [rsi]\n    mov [rdi], al\n    test al, al\n    jz .copy_done\n    inc rdi\n    inc rsi\n    jmp .copy_loop\n.copy_done:\n    pop rax\n    ret\n");
-    emit(state, "get_heap:\n    mov rax, [rel heap_ptr]\n    ret\n");
     emit(state, "reboot:\n    mov al, 0xFE\n    out 0x64, al\n    ret\n");
     emit(state, "shutdown:\n    mov dx, 0x604\n    mov ax, 0x2000\n    out dx, ax\n    ret\n");
     
-    emit(state, "disk_read:\n    push rbx\n    push rcx\n    push rdx\n    push rdi\n    push rsi\n    mov rbx, rsi\n    mov ecx, 256\n.wait_bsy_read:\n    mov dx, 0x1F7\n    in al, dx\n    test al, 0x80\n    jnz .wait_bsy_read\n    mov dx, 0x1F6\n    mov al, 0xE0\n    out dx, al\n    mov dx, 0x1F2\n    mov al, 1\n    out dx, al\n    mov dx, 0x1F3\n    mov eax, edi\n    out dx, al\n    mov dx, 0x1F4\n    mov eax, edi\n    shr eax, 8\n    out dx, al\n    mov dx, 0x1F5\n    mov eax, edi\n    shr eax, 16\n    out dx, al\n    mov dx, 0x1F6\n    mov eax, edi\n    shr eax, 24\n    and al, 0x0F\n    or al, 0xE0\n    out dx, al\n    mov dx, 0x1F7\n    mov al, 0x20\n    out dx, al\n.wait_drq_read:\n    in al, dx\n    test al, 0x08\n    jz .wait_drq_read\n    mov dx, 0x1F0\n    mov rdi, rbx\n.read_loop:\n    in ax, dx\n    mov [rdi], ax\n    add rdi, 2\n    dec ecx\n    jnz .read_loop\n    pop rsi\n    pop rdi\n    pop rdx\n    pop rcx\n    pop rbx\n    ret\n");
-    emit(state, "disk_write:\n    push rbx\n    push rcx\n    push rdx\n    push rdi\n    push rsi\n    mov rbx, rsi\n    mov ecx, 256\n.wait_bsy_write:\n    mov dx, 0x1F7\n    in al, dx\n    test al, 0x80\n    jnz .wait_bsy_write\n    mov dx, 0x1F6\n    mov al, 0xE0\n    out dx, al\n    mov dx, 0x1F2\n    mov al, 1\n    out dx, al\n    mov dx, 0x1F3\n    mov eax, edi\n    out dx, al\n    mov dx, 0x1F4\n    mov eax, edi\n    shr eax, 8\n    out dx, al\n    mov dx, 0x1F5\n    mov eax, edi\n    shr eax, 16\n    out dx, al\n    mov dx, 0x1F6\n    mov eax, edi\n    shr eax, 24\n    and al, 0x0F\n    or al, 0xE0\n    out dx, al\n    mov dx, 0x1F7\n    mov al, 0x30\n    out dx, al\n.wait_drq_write:\n    in al, dx\n    test al, 0x08\n    jz .wait_drq_write\n    mov dx, 0x1F0\n    mov rdi, rbx\n.write_loop:\n    mov ax, [rdi]\n    out dx, ax\n    add rdi, 2\n    dec ecx\n    jnz .write_loop\n    pop rsi\n    pop rdi\n    pop rdx\n    pop rcx\n    pop rbx\n    ret\n");
+    // FIXED: Removed the duplicate 0x1F6 write
+    emit(state, "disk_read:\n    push rbx\n    push rcx\n    push rdx\n    push rdi\n    push rsi\n    mov rbx, rsi\n    mov ecx, 256\n.wait_bsy_read:\n    mov dx, 0x1F7\n    in al, dx\n    test al, 0x80\n    jnz .wait_bsy_read\n    mov dx, 0x1F6\n    mov eax, edi\n    shr eax, 24\n    and al, 0x0F\n    or al, 0xE0\n    out dx, al\n    mov dx, 0x1F7\n    in al, dx\n    in al, dx\n    in al, dx\n    in al, dx\n    mov dx, 0x1F2\n    mov al, 1\n    out dx, al\n    mov dx, 0x1F3\n    mov eax, edi\n    out dx, al\n    mov dx, 0x1F4\n    mov eax, edi\n    shr eax, 8\n    out dx, al\n    mov dx, 0x1F5\n    mov eax, edi\n    shr eax, 16\n    out dx, al\n    mov dx, 0x1F7\n    mov al, 0x20\n    out dx, al\n.wait_drq_read:\n    in al, dx\n    test al, 0x08\n    jz .wait_drq_read\n    mov dx, 0x1F0\n    mov rdi, rbx\n.read_loop:\n    in ax, dx\n    mov [rdi], ax\n    add rdi, 2\n    dec ecx\n    jnz .read_loop\n    mov dx, 0x1F7\n.wait_done_read:\n    in al, dx\n    test al, 0x80\n    jnz .wait_done_read\n    pop rsi\n    pop rdi\n    pop rdx\n    pop rcx\n    pop rbx\n    ret\n");
+    
+    emit(state, "disk_write:\n    push rbx\n    push rcx\n    push rdx\n    push rdi\n    push rsi\n    mov rbx, rsi\n    mov ecx, 256\n.wait_bsy_write:\n    mov dx, 0x1F7\n    in al, dx\n    test al, 0x80\n    jnz .wait_bsy_write\n    mov dx, 0x1F6\n    mov eax, edi\n    shr eax, 24\n    and al, 0x0F\n    or al, 0xE0\n    out dx, al\n    mov dx, 0x1F7\n    in al, dx\n    in al, dx\n    in al, dx\n    in al, dx\n    mov dx, 0x1F2\n    mov al, 1\n    out dx, al\n    mov dx, 0x1F3\n    mov eax, edi\n    out dx, al\n    mov dx, 0x1F4\n    mov eax, edi\n    shr eax, 8\n    out dx, al\n    mov dx, 0x1F5\n    mov eax, edi\n    shr eax, 16\n    out dx, al\n    mov dx, 0x1F7\n    mov al, 0x30\n    out dx, al\n.wait_drq_write:\n    in al, dx\n    test al, 0x08\n    jz .wait_drq_write\n    mov dx, 0x1F0\n    mov rdi, rbx\n.write_loop:\n    mov ax, [rdi]\n    out dx, ax\n    add rdi, 2\n    dec ecx\n    jnz .write_loop\n    mov dx, 0x1F7\n    mov al, 0xE7\n    out dx, al\n.wait_done_write:\n    in al, dx\n    test al, 0x80\n    jnz .wait_done_write\n    pop rsi\n    pop rdi\n    pop rdx\n    pop rcx\n    pop rbx\n    ret\n");
 
-    emit(state, "pci_read32:\n    push rbx\n    shl rdi, 16\n    shl rsi, 11\n    shl rdx, 8\n    mov rbx, rdi\n    or rbx, rsi\n    or rbx, rdx\n    or rbx, rcx\n    or rbx, 0x80000000\n    mov dx, 0xCF8\n    mov eax, ebx\n    out dx, eax\n    mov dx, 0xCFC\n    in eax, dx\n    pop rbx\n    ret\n");
-    emit(state, "pci_write32:\n    push rbx\n    shl rdi, 16\n    shl rsi, 11\n    shl rdx, 8\n    mov rbx, rdi\n    or rbx, rsi\n    or rbx, rdx\n    or rbx, rcx\n    or rbx, 0x80000000\n    mov dx, 0xCF8\n    mov eax, ebx\n    out dx, eax\n    mov dx, 0xCFC\n    mov eax, r8d\n    out dx, eax\n    pop rbx\n    ret\n");
     emit(state, "mem_read32:\n    mov eax, [rdi]\n    ret\n");
     emit(state, "mem_read16:\n    movzx eax, word [rdi]\n    ret\n");
     emit(state, "mem_read8:\n    movzx eax, byte [rdi]\n    ret\n");
     emit(state, "mem_write32:\n    mov [rdi], esi\n    ret\n");
     emit(state, "mem_write16:\n    mov [rdi], si\n    ret\n");
     emit(state, "mem_write8:\n    mov [rdi], sil\n    ret\n");
-    
+
     emit(state, "keyboard_read_ascii:\n.wait_ascii:\n    mov dx, 0x64\n.kbd_wait_ascii:\n    in al, dx\n    test al, 1\n    jz .kbd_wait_ascii\n    mov dx, 0x60\n    in al, dx\n    cmp al, 0x2A\n    je .shift_down\n    cmp al, 0x36\n    je .shift_down\n    cmp al, 0xAA\n    je .shift_up\n    cmp al, 0xB6\n    je .shift_up\n    test al, 0x80\n    jnz .wait_ascii\n    movzx rax, al\n    cmp byte [rel shift_pressed], 1\n    je .use_shift\n    lea r8, [rel scancode_map]\n    jmp .lookup\n.use_shift:\n    lea r8, [rel scancode_map_shift]\n.lookup:\n    movzx rax, byte [r8 + rax]\n    test rax, rax\n    jz .wait_ascii\n    ret\n.shift_down:\n    mov byte [rel shift_pressed], 1\n    jmp .wait_ascii\n.shift_up:\n    mov byte [rel shift_pressed], 0\n    jmp .wait_ascii\n");
     emit(state, "alloc:\n    mov rax, [rel heap_ptr]\n    add [rel heap_ptr], rdi\n    ret\n");
     emit(state, "section .data\nalign 8\nvga_cursor: dd 0\nheap_ptr:   dq 0x200000\nshift_pressed: db 0\ngdt64:\n    dq 0\n    dq 0x00209A0000000000\n    dq 0x0000920000000000\ngdt64_ptr:\n    dw $ - gdt64 - 1\n    dd gdt64\n");

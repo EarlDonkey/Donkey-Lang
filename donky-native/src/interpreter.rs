@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -8,6 +6,7 @@ use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write};
 use crate::ast::{Expr, Stmt};
 use crate::lexer::TokenType;
+use crate::heap::{Value, MapKey, Heap, HeapObject};
 
 static CLIENTS: OnceLock<Mutex<HashMap<usize, TcpStream>>> = OnceLock::new();
 static SERVERS: OnceLock<Mutex<HashMap<usize, TcpListener>>> = OnceLock::new();
@@ -16,64 +15,6 @@ static COUNTER: OnceLock<Mutex<usize>> = OnceLock::new();
 fn get_clients() -> &'static Mutex<HashMap<usize, TcpStream>> { CLIENTS.get_or_init(|| Mutex::new(HashMap::new())) }
 fn get_servers() -> &'static Mutex<HashMap<usize, TcpListener>> { SERVERS.get_or_init(|| Mutex::new(HashMap::new())) }
 fn get_counter() -> &'static Mutex<usize> { COUNTER.get_or_init(|| Mutex::new(1)) }
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum MapKey { String(String), Number(usize), Bool(bool) }
-
-impl MapKey {
-    pub fn from_value(v: &Value) -> Result<MapKey, String> {
-        match v {
-            Value::String(s) => Ok(MapKey::String(s.clone())),
-            Value::Number(n) => Ok(MapKey::Number(n.to_bits() as usize)),
-            Value::Bool(b) => Ok(MapKey::Bool(*b)),
-            _ => Err("Map keys must be strings, numbers, or bools".to_string()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Value {
-    Number(f64), String(String), Bool(bool),
-    Function { params: Vec<String>, body: Box<Stmt> },
-    Array(Rc<RefCell<Vec<Value>>>),
-    Map(Rc<RefCell<HashMap<MapKey, Value>>>),
-    Struct(String, Rc<RefCell<HashMap<String, Value>>>),
-    Null,
-}
-
-impl Value {
-    pub fn is_truthy(&self) -> bool { matches!(self, Value::Bool(true)) }
-    pub fn to_string(&self) -> String {
-        match self {
-            Value::Number(n) => if n.fract() == 0.0 { format!("{:.0}", n) } else { n.to_string() },
-            Value::String(s) => s.clone(),
-            Value::Bool(b) => b.to_string(),
-            Value::Function { .. } => "<fn>".to_string(),
-            Value::Array(arr) => {
-                let list: Vec<String> = arr.borrow().iter().map(|v| v.to_string()).collect();
-                format!("[{}]", list.join(", "))
-            }
-            Value::Map(map) => {
-                let mut pairs = Vec::new();
-                for (k, v) in map.borrow().iter() {
-                    let key_str = match k {
-                        MapKey::String(s) => s.clone(),
-                        MapKey::Number(n) => Value::Number(f64::from_bits(*n as u64)).to_string(),
-                        MapKey::Bool(b) => b.to_string(),
-                    };
-                    pairs.push(format!("{}: {}", key_str, v.to_string()));
-                }
-                format!("{{{}}}", pairs.join(", "))
-            }
-            Value::Struct(_, fields) => {
-                let mut pairs = Vec::new();
-                for (k, v) in fields.borrow().iter() { pairs.push(format!("{}: {}", k, v.to_string())); }
-                format!("{{{}}}", pairs.join(", "))
-            }
-            Value::Null => "null".to_string(),
-        }
-    }
-}
 
 pub enum ControlFlow {
     Normal, Return(Value), Break, Continue, Throw(Value)
@@ -105,14 +46,21 @@ impl Environment {
     pub fn pop_scope(&mut self) { self.scopes.pop(); }
 }
 
-pub struct Interpreter { env: Environment }
+pub struct Interpreter { 
+    env: Environment,
+    heap: Heap,
+}
 
 impl Interpreter {
     pub fn new(script_args: Vec<String>) -> Self {
         let mut env = Environment::new();
+        let mut heap = Heap::new();
+        
         let args_val = script_args.into_iter().map(Value::String).collect();
-        env.define("args".to_string(), Value::Array(Rc::new(RefCell::new(args_val))));
-        Interpreter { env }
+        let arr_idx = heap.alloc(HeapObject::Array(args_val));
+        env.define("args".to_string(), Value::Array(arr_idx));
+        
+        Interpreter { env, heap }
     }
 
     pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<(), String> {
@@ -128,6 +76,7 @@ impl Interpreter {
 
     fn execute(&mut self, stmt: Stmt) -> Result<ControlFlow, String> {
         match stmt {
+            Stmt::Asm(_) => Ok(ControlFlow::Normal),
             Stmt::Import(path) => {
                 let file_content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
                 let mut lex = crate::lexer::Lexer::new(&file_content);
@@ -174,15 +123,28 @@ impl Interpreter {
                 
                 let target = self.env.get(&name)?;
                 match target {
-                    Value::Array(arr) => {
+                    Value::Array(idx) => {
                         if let Value::Number(n) = index {
                             let i = n as usize;
-                            let mut borrowed = arr.borrow_mut();
-                            if i < borrowed.len() { borrowed[i] = value; } else { return Err(format!("Index {} out of range", i)); }
+                            if let HeapObject::Array(arr) = self.heap.get_mut(idx) {
+                                if i < arr.len() { arr[i] = value; } else { return Err(format!("Index {} out of range", i)); }
+                            }
                         } else { return Err("Array index must be a number".to_string()); }
                     }
-                    Value::Map(map) => { let key = MapKey::from_value(&index)?; map.borrow_mut().insert(key, value); }
-                    Value::Struct(_, fields) => { if let Value::String(k) = index { fields.borrow_mut().insert(k, value); } else { return Err("Struct index must be a string".to_string()); } }
+                    Value::Map(idx) => { 
+                        if let Ok(key) = MapKey::from_value(&index) {
+                            if let HeapObject::Map(map) = self.heap.get_mut(idx) {
+                                map.insert(key, value);
+                            }
+                        }
+                    }
+                    Value::Struct(idx) => { 
+                        if let Value::String(k) = index { 
+                            if let HeapObject::Struct(fields) = self.heap.get_mut(idx) {
+                                fields.insert(k, value); 
+                            }
+                        } else { return Err("Struct index must be a string".to_string()); } 
+                    }
                     _ => return Err("Can only index-assign arrays, maps, or structs".to_string()),
                 }
                 Ok(ControlFlow::Normal)
@@ -191,12 +153,10 @@ impl Interpreter {
                 let obj = self.evaluate(obj_expr)?;
                 let value = self.evaluate(val_expr)?;
                 match obj {
-                    Value::Struct(name, fields) => {
-                        if let Some(exp) = self.env.structs.get(&name).and_then(|s| s.get(&field)) {
-                            let vt = match &value { Value::Number(_) => "num", Value::String(_) => "str", Value::Bool(_) => "bool", _ => "any" };
-                            if exp != "any" && exp != vt { return Err(format!("Field '{}' expects {}, got {}", field, exp, vt)); }
+                    Value::Struct(idx) => {
+                        if let HeapObject::Struct(fields) = self.heap.get_mut(idx) {
+                            fields.insert(field, value);
                         }
-                        fields.borrow_mut().insert(field, value);
                         Ok(ControlFlow::Normal)
                     }
                     _ => Err("Can only set fields on structs".to_string()),
@@ -232,8 +192,11 @@ impl Interpreter {
             }
             Stmt::For(name, iter_expr, body) => {
                 match self.evaluate(iter_expr)? {
-                    Value::Array(arr) => {
-                        let items = arr.borrow().clone();
+                    Value::Array(idx) => {
+                        let items = if let HeapObject::Array(arr) = self.heap.get(idx) {
+                            arr.clone()
+                        } else { Vec::new() };
+                        
                         for item in items {
                             self.env.push_scope();
                             self.env.define(name.clone(), item);
@@ -274,20 +237,18 @@ impl Interpreter {
                 if !self.env.structs.contains_key(&name) { return Err(format!("Undefined struct '{}'", name)); }
                 let mut map = HashMap::new();
                 for (f, e) in fields { map.insert(f, self.evaluate(e)?); }
-                Ok(Value::Struct(name, Rc::new(RefCell::new(map))))
+                let idx = self.heap.alloc(HeapObject::Struct(map));
+                Ok(Value::Struct(idx))
             }
             Expr::FieldAccess(obj, field) => {
                 match self.evaluate(*obj)? {
-                    Value::Struct(_, fields) => match fields.borrow().get(&field) {
-                        Some(v) => Ok(v.clone()),
-                        None => Ok(Value::Null),
-                    },
-                    Value::Map(map) => {
-                        let key = MapKey::String(field.clone());
-                        match map.borrow().get(&key) {
-                            Some(v) => Ok(v.clone()),
-                            None => Ok(Value::Null),
-                        }
+                    Value::Struct(idx) => {
+                        if let HeapObject::Struct(fields) = self.heap.get(idx) {
+                            match fields.get(&field) {
+                                Some(v) => Ok(v.clone()),
+                                None => Ok(Value::Null),
+                            }
+                        } else { Ok(Value::Null) }
                     }
                     _ => Ok(Value::Null),
                 }
@@ -295,7 +256,8 @@ impl Interpreter {
             Expr::Array(elements) => {
                 let mut arr = Vec::new();
                 for el in elements { arr.push(self.evaluate(el)?); }
-                Ok(Value::Array(Rc::new(RefCell::new(arr))))
+                let idx = self.heap.alloc(HeapObject::Array(arr));
+                Ok(Value::Array(idx))
             }
             Expr::Map(pairs) => {
                 let mut map = HashMap::new();
@@ -303,34 +265,39 @@ impl Interpreter {
                     let key = MapKey::from_value(&self.evaluate(k)?)?;
                     map.insert(key, self.evaluate(v)?);
                 }
-                Ok(Value::Map(Rc::new(RefCell::new(map))))
+                let idx = self.heap.alloc(HeapObject::Map(map));
+                Ok(Value::Map(idx))
             }
             Expr::Index(target, index) => {
                 let target_val = self.evaluate(*target)?;
                 let index_val = self.evaluate(*index)?;
                 
                 match target_val {
-                    Value::Array(arr) => {
+                    Value::Array(idx) => {
                         if let Value::Number(n) = index_val {
                             let i = n as usize;
-                            let borrowed = arr.borrow();
-                            if i < borrowed.len() { Ok(borrowed[i].clone()) } else { Err(format!("Index {} out of range", i)) }
+                            if let HeapObject::Array(arr) = self.heap.get(idx) {
+                                if i < arr.len() { Ok(arr[i].clone()) } else { Err(format!("Index {} out of range", i)) }
+                            } else { Err("Not an array".to_string()) }
                         } else { Err("Array index must be a number".to_string()) }
                     }
-                    Value::Map(map) => {
+                    Value::Map(idx) => {
                         let key = MapKey::from_value(&index_val)?;
-                        let borrowed = map.borrow();
-                        match borrowed.get(&key) {
-                            Some(v) => Ok(v.clone()),
-                            None => Err("Key not found in map".to_string()),
-                        }
-                    }
-                    Value::Struct(_, fields) => {
-                        if let Value::String(k) = index_val {
-                            match fields.borrow().get(&k) {
+                        if let HeapObject::Map(map) = self.heap.get(idx) {
+                            match map.get(&key) {
                                 Some(v) => Ok(v.clone()),
-                                None => Err(format!("Key '{}' not found in struct", k)),
+                                None => Err("Key not found in map".to_string()),
                             }
+                        } else { Err("Not a map".to_string()) }
+                    }
+                    Value::Struct(idx) => {
+                        if let Value::String(k) = index_val {
+                            if let HeapObject::Struct(fields) = self.heap.get(idx) {
+                                match fields.get(&k) {
+                                    Some(v) => Ok(v.clone()),
+                                    None => Err(format!("Key '{}' not found in struct", k)),
+                                }
+                            } else { Err("Not a struct".to_string()) }
                         } else { Err("Struct index must be a string".to_string()) }
                     }
                     Value::String(s) => {
@@ -346,32 +313,6 @@ impl Interpreter {
                 }
             }
             Expr::Call(name, args) => {
-                if name == "extract_zip" {
-                    let zip_path = self.evaluate(args[0].clone())?.to_string();
-                    let dest_path = self.evaluate(args[1].clone())?.to_string();
-                    
-                    let file = fs::File::open(&zip_path).map_err(|e| format!("Failed to open zip: {}", e))?;
-                    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Failed to read zip: {}", e))?;
-                    
-                    for i in 0..archive.len() {
-                        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-                        let outpath = match file.enclosed_name() {
-                            Some(path) => Path::new(&dest_path).join(path),
-                            None => continue,
-                        };
-                        
-                        if (*file.name()).ends_with('/') {
-                            fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
-                        } else {
-                            if let Some(p) = outpath.parent() {
-                                if !p.exists() { fs::create_dir_all(&p).map_err(|e| e.to_string())?; }
-                            }
-                            let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
-                            std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
-                        }
-                    }
-                    return Ok(Value::Null);
-                }
                 if name == "tcp_listen" {
                     let p = self.evaluate(args[0].clone())?;
                     if let Value::Number(port) = p {
@@ -507,7 +448,8 @@ impl Interpreter {
                                 if let Ok(name) = entry.file_name().into_string() { files.push(Value::String(name)); }
                             }
                         }
-                        return Ok(Value::Array(Rc::new(RefCell::new(files))));
+                        let idx = self.heap.alloc(HeapObject::Array(files));
+                        return Ok(Value::Array(idx));
                     }
                     return Err("list_dir() expects string".to_string());
                 }
@@ -522,20 +464,37 @@ impl Interpreter {
                     let a = self.evaluate(args[0].clone())?;
                     match a {
                         Value::String(s) => return Ok(Value::Number(s.len() as f64)),
-                        Value::Array(a) => return Ok(Value::Number(a.borrow().len() as f64)),
-                        Value::Map(m) => return Ok(Value::Number(m.borrow().len() as f64)),
+                        Value::Array(idx) => {
+                            if let HeapObject::Array(arr) = self.heap.get(idx) {
+                                return Ok(Value::Number(arr.len() as f64));
+                            }
+                        }
+                        Value::Map(idx) => {
+                            if let HeapObject::Map(map) = self.heap.get(idx) {
+                                return Ok(Value::Number(map.len() as f64));
+                            }
+                        }
                         _ => return Err("len() expects string, array, or map".to_string()),
                     }
                 }
                 if name == "push" {
                     let t = self.evaluate(args[0].clone())?;
                     let v = self.evaluate(args[1].clone())?;
-                    if let Value::Array(a) = t { a.borrow_mut().push(v); return Ok(Value::Null); }
+                    if let Value::Array(idx) = t { 
+                        if let HeapObject::Array(arr) = self.heap.get_mut(idx) {
+                            arr.push(v); 
+                            return Ok(Value::Null); 
+                        }
+                    }
                     return Err("push() expects an array".to_string());
                 }
                 if name == "pop" {
                     let t = self.evaluate(args[0].clone())?;
-                    if let Value::Array(a) = t { return Ok(a.borrow_mut().pop().unwrap_or(Value::Null)); }
+                    if let Value::Array(idx) = t { 
+                        if let HeapObject::Array(arr) = self.heap.get_mut(idx) {
+                            return Ok(arr.pop().unwrap_or(Value::Null)); 
+                        }
+                    }
                     return Err("pop() expects an array".to_string());
                 }
                 if name == "input" {
@@ -581,37 +540,57 @@ impl Interpreter {
                     let t = self.evaluate(args[0].clone())?; let i = self.evaluate(args[1].clone())?;
                     match (t, i) {
                         (Value::String(s), Value::String(sub)) => return Ok(Value::Bool(s.contains(&sub))),
-                        (Value::Array(a), v) => { let b = a.borrow(); return Ok(Value::Bool(b.iter().any(|x| x.to_string() == v.to_string()))); }
-                        (Value::Map(m), v) => { if let Ok(k) = MapKey::from_value(&v) { return Ok(Value::Bool(m.borrow().contains_key(&k))); } }
+                        (Value::Array(idx), v) => { 
+                            if let HeapObject::Array(arr) = self.heap.get(idx) {
+                                return Ok(Value::Bool(arr.iter().any(|x| x.to_string() == v.to_string()))); 
+                            }
+                        }
+                        (Value::Map(idx), v) => { 
+                            if let Ok(k) = MapKey::from_value(&v) { 
+                                if let HeapObject::Map(map) = self.heap.get(idx) {
+                                    return Ok(Value::Bool(map.contains_key(&k))); 
+                                }
+                            } 
+                        }
                         _ => return Err("contains() expects compatible types".to_string()),
                     }
+                    return Ok(Value::Bool(false));
                 }
                 if name == "split" {
                     let s = self.evaluate(args[0].clone())?; let sep = self.evaluate(args[1].clone())?;
                     if let (Value::String(sv), Value::String(sepv)) = (s, sep) {
                         if sepv.is_empty() { return Err("split() separator cannot be empty".to_string()); }
                         let parts: Vec<Value> = sv.split(&sepv).map(|p| Value::String(p.to_string())).collect();
-                        return Ok(Value::Array(Rc::new(RefCell::new(parts))));
+                        let idx = self.heap.alloc(HeapObject::Array(parts));
+                        return Ok(Value::Array(idx));
                     }
                     return Err("split() expects two strings".to_string());
                 }
                 if name == "join" {
                     let a = self.evaluate(args[0].clone())?; let sep = self.evaluate(args[1].clone())?;
-                    if let (Value::Array(av), Value::String(sepv)) = (a, sep) {
-                        let b = av.borrow(); let mut parts = Vec::new();
-                        for item in b.iter() { if let Value::String(s) = item { parts.push(s.clone()); } else { return Err("join() expects array of strings".to_string()); } }
-                        return Ok(Value::String(parts.join(&sepv)));
+                    if let (Value::Array(idx), Value::String(sepv)) = (a, sep) {
+                        if let HeapObject::Array(arr) = self.heap.get(idx) {
+                            let mut parts = Vec::new();
+                            for item in arr.iter() { 
+                                if let Value::String(s) = item { parts.push(s.clone()); } 
+                                else { return Err("join() expects array of strings".to_string()); } 
+                            }
+                            return Ok(Value::String(parts.join(&sepv)));
+                        }
                     }
                     return Err("join() expects array and string".to_string());
                 }
                 if name == "keys" {
-                    if let Value::Map(m) = self.evaluate(args[0].clone())? {
-                        let b = m.borrow(); let mut keys = Vec::new();
-                        for k in b.keys() {
-                            let kv = match k { MapKey::String(s) => Value::String(s.clone()), MapKey::Number(n) => Value::Number(f64::from_bits(*n as u64)), MapKey::Bool(b) => Value::Bool(*b) };
-                            keys.push(kv);
+                    if let Value::Map(idx) = self.evaluate(args[0].clone())? {
+                        let mut keys = Vec::new();
+                        if let HeapObject::Map(map) = self.heap.get(idx) {
+                            for k in map.keys() {
+                                let kv = match k { MapKey::String(s) => Value::String(s.clone()), MapKey::Number(n) => Value::Number(f64::from_bits(*n as u64)), MapKey::Bool(b) => Value::Bool(*b) };
+                                keys.push(kv);
+                            }
                         }
-                        return Ok(Value::Array(Rc::new(RefCell::new(keys))));
+                        let out_idx = self.heap.alloc(HeapObject::Array(keys));
+                        return Ok(Value::Array(out_idx));
                     }
                     return Err("keys() expects map".to_string());
                 }
@@ -656,17 +635,18 @@ impl Interpreter {
                     return Err("byte_substr() expects (string, number, number)".to_string());
                 }
                 if name == "bytes_to_str" {
-                    let a = self.evaluate(args[0].clone())?;
-                    if let Value::Array(arr) = a {
-                        let borrowed = arr.borrow(); let mut buf = Vec::with_capacity(borrowed.len());
-                        for v in borrowed.iter() {
-                            if let Value::Number(n) = v {
-                                let b = *n as i64;
-                                if !(0..=255).contains(&b) { return Err(format!("bytes_to_str: byte value out of range: {}", b)); }
-                                buf.push(b as u8);
-                            } else { return Err("bytes_to_str() expects array of numbers".to_string()); }
+                    if let Value::Array(idx) = self.evaluate(args[0].clone())? {
+                        if let HeapObject::Array(arr) = self.heap.get(idx) {
+                            let mut buf = Vec::with_capacity(arr.len());
+                            for v in arr.iter() {
+                                if let Value::Number(n) = v {
+                                    let b = *n as i64;
+                                    if !(0..=255).contains(&b) { return Err(format!("bytes_to_str: byte value out of range: {}", b)); }
+                                    buf.push(b as u8);
+                                } else { return Err("bytes_to_str() expects array of numbers".to_string()); }
+                            }
+                            return Ok(Value::String(String::from_utf8_lossy(&buf).to_string()));
                         }
-                        return Ok(Value::String(String::from_utf8_lossy(&buf).to_string()));
                     }
                     return Err("bytes_to_str() expects an array".to_string());
                 }
@@ -785,6 +765,13 @@ impl Interpreter {
                         _ => true,
                     })),
                     _ => Err("Unknown binary operator".to_string()),
+                }
+            }
+            Expr::Ternary(cond, then_b, else_b) => {
+                if self.evaluate(*cond)?.is_truthy() {
+                    self.evaluate(*then_b)
+                } else {
+                    self.evaluate(*else_b)
                 }
             }
         }

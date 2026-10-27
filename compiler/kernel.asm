@@ -118,6 +118,12 @@ L0:
     mov rax, [rbp - 8]
     mov rdi, rax
     call read_line
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_2]
+    mov rsi, rax
+    pop rdi
+    call str_eq
     push rax
     mov rax, 1
     mov rbx, rax
@@ -127,52 +133,18 @@ L0:
     movzx rax, al
     cmp rax, 0
     je L2
-    lea rax, [rel str_2]
-    mov rdi, rax
-    call print_str
-    call print_newline
     lea rax, [rel str_3]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_4]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_5]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_6]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_7]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_8]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_9]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_10]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_11]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_12]
     mov rdi, rax
     call print_str
     call print_newline
     jmp L3
 L2:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_4]
+    mov rsi, rax
+    pop rdi
+    call str_eq
     push rax
     mov rax, 1
     mov rbx, rax
@@ -182,40 +154,19 @@ L2:
     movzx rax, al
     cmp rax, 0
     je L4
-    lea rax, [rel str_13]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_14]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_15]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_16]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_17]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_18]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_19]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    lea rax, [rel str_20]
+    call clear_screen
+    lea rax, [rel str_5]
     mov rdi, rax
     call print_str
     call print_newline
     jmp L5
 L4:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_6]
+    mov rsi, rax
+    pop rdi
+    call str_eq
     push rax
     mov rax, 1
     mov rbx, rax
@@ -225,86 +176,75 @@ L4:
     movzx rax, al
     cmp rax, 0
     je L6
-    lea rax, [rel str_21]
+    lea rax, [rel str_7]
     mov rdi, rax
     call print_str
-    call print_newline
-    mov rax, 1
+    call reboot
+    jmp L7
+L6:
+    mov rax, [rbp - 8]
     push rax
-    mov rax, [rbp - 16]
+    lea rax, [rel str_8]
     mov rsi, rax
     pop rdi
-    call disk_read
-    mov rax, 0
-    mov [rbp - 24], rax
-L7:
-    mov rax, [rbp - 24]
-    push rax
-    mov rax, 64
-    mov rbx, rax
-    pop rax
-    cmp rax, rbx
-    setl al
-    movzx rax, al
-    cmp rax, 0
-    je L8
-    mov rax, [rbp - 16]
-    push rax
-    mov rax, [rbp - 24]
-    mov rbx, rax
-    pop rax
-    add rax, rbx
-    mov rdi, rax
-    call mem_read8
-    mov [rbp - 32], rax
-    mov rax, [rbp - 32]
-    push rax
-    mov rax, 16
-    mov rbx, rax
-    pop rax
-    cmp rax, rbx
-    setl al
-    movzx rax, al
-    cmp rax, 0
-    je L9
-    lea rax, [rel str_22]
-    mov rdi, rax
-    call print_str
-    jmp L10
-L9:
-L10:
-    mov rax, [rbp - 32]
-    mov rdi, rax
-    call print_hex
-    lea rax, [rel str_23]
-    mov rdi, rax
-    call print_str
-    mov rax, [rbp - 24]
+    call str_eq
     push rax
     mov rax, 1
-    mov rbx, rax
-    pop rax
-    add rax, rbx
-    push rax
-    mov rax, 16
-    mov rbx, rax
-    pop rax
-    xor rdx, rdx
-    div rbx
-    mov rax, rdx
-    push rax
-    mov rax, 0
     mov rbx, rax
     pop rax
     cmp rax, rbx
     sete al
     movzx rax, al
     cmp rax, 0
-    je L11
-    call print_newline
-    jmp L12
+    je L8
+    lea rax, [rel str_9]
+    mov rdi, rax
+    call print_str
+    call shutdown
+    jmp L9
+L8:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_10]
+    mov rsi, rax
+    pop rdi
+    call str_eq
+    push rax
+    mov rax, 1
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    sete al
+    movzx rax, al
+    cmp rax, 0
+    je L10
+    lea rax, [rel str_11]
+    mov rdi, rax
+    call print_str
+    mov rax, 0
+    mov [rbp - 24], rax
 L11:
-L12:
+    mov rax, [rbp - 24]
+    push rax
+    mov rax, 512
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    setl al
+    movzx rax, al
+    cmp rax, 0
+    je L12
+    mov rax, [rbp - 16]
+    push rax
+    mov rax, [rbp - 24]
+    mov rbx, rax
+    pop rax
+    add rax, rbx
+    push rax
+    mov rax, 0
+    mov rsi, rax
+    pop rdi
+    call mem_write8
     mov rax, [rbp - 24]
     push rax
     mov rax, 1
@@ -312,11 +252,26 @@ L12:
     pop rax
     add rax, rbx
     mov [rbp - 24], rax
-    jmp L7
-L8:
+    jmp L11
+L12:
+    mov rax, 1
+    push rax
+    mov rax, [rbp - 16]
+    mov rsi, rax
+    pop rdi
+    call disk_write
+    lea rax, [rel str_12]
+    mov rdi, rax
+    call print_str
     call print_newline
     jmp L13
-L6:
+L10:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_13]
+    mov rsi, rax
+    pop rdi
+    call str_eq
     push rax
     mov rax, 1
     mov rbx, rax
@@ -332,12 +287,25 @@ L6:
     mov rsi, rax
     pop rdi
     call disk_read
+    lea rax, [rel str_14]
+    mov rdi, rax
+    call print_str
+    call print_newline
     mov rax, [rbp - 16]
+    mov rdi, rax
+    call print_str
+    lea rax, [rel str_15]
     mov rdi, rax
     call print_str
     call print_newline
     jmp L15
 L14:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_16]
+    mov rsi, rax
+    pop rdi
+    call str_starts_with
     push rax
     mov rax, 1
     mov rbx, rax
@@ -347,9 +315,19 @@ L14:
     movzx rax, al
     cmp rax, 0
     je L16
-    lea rax, [rel str_24]
-    mov rdi, rax
-    call print_str
+    mov rax, [rbp - 8]
+    push rax
+    mov rax, 6
+    mov rsi, rax
+    pop rdi
+    call str_skip
+    mov [rbp - 32], rax
+    mov rax, 1
+    push rax
+    mov rax, [rbp - 16]
+    mov rsi, rax
+    pop rdi
+    call disk_read
     mov rax, 0
     mov [rbp - 40], rax
 L17:
@@ -369,11 +347,20 @@ L17:
     mov rbx, rax
     pop rax
     add rax, rbx
+    mov rdi, rax
+    call mem_read8
     push rax
     mov rax, 0
-    mov rsi, rax
-    pop rdi
-    call mem_write8
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    sete al
+    movzx rax, al
+    cmp rax, 0
+    je L19
+    jmp L20
+L19:
+L20:
     mov rax, [rbp - 40]
     push rax
     mov rax, 1
@@ -383,30 +370,17 @@ L17:
     mov [rbp - 40], rax
     jmp L17
 L18:
-    mov rax, 1
-    push rax
     mov rax, [rbp - 16]
-    mov rsi, rax
-    pop rdi
-    call disk_write
-    lea rax, [rel str_25]
-    mov rdi, rax
-    call print_str
-    call print_newline
-    jmp L19
-L16:
     push rax
-    mov rax, 1
+    mov rax, [rbp - 40]
     mov rbx, rax
     pop rax
-    cmp rax, rbx
-    sete al
-    movzx rax, al
-    cmp rax, 0
-    je L20
-    lea rax, [rel str_26]
-    mov rdi, rax
-    call print_str
+    add rax, rbx
+    push rax
+    mov rax, [rbp - 32]
+    mov rsi, rax
+    pop rdi
+    call str_copy
     mov rax, 0
     mov [rbp - 48], rax
 L21:
@@ -422,15 +396,29 @@ L21:
     je L22
     mov rax, [rbp - 16]
     push rax
-    mov rax, [rbp - 48]
+    mov rax, [rbp - 40]
     mov rbx, rax
     pop rax
     add rax, rbx
     push rax
+    mov rax, [rbp - 48]
+    mov rbx, rax
+    pop rax
+    add rax, rbx
+    mov rdi, rax
+    call mem_read8
+    push rax
     mov rax, 0
-    mov rsi, rax
-    pop rdi
-    call mem_write8
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    sete al
+    movzx rax, al
+    cmp rax, 0
+    je L23
+    jmp L24
+L23:
+L24:
     mov rax, [rbp - 48]
     push rax
     mov rax, 1
@@ -440,32 +428,64 @@ L21:
     mov [rbp - 48], rax
     jmp L21
 L22:
+    mov rax, [rbp - 16]
+    push rax
+    mov rax, [rbp - 40]
+    mov rbx, rax
+    pop rax
+    add rax, rbx
+    push rax
+    mov rax, [rbp - 48]
+    mov rbx, rax
+    pop rax
+    add rax, rbx
+    push rax
+    mov rax, 10
+    mov rsi, rax
+    pop rdi
+    call mem_write8
+    mov rax, [rbp - 16]
+    push rax
+    mov rax, [rbp - 40]
+    mov rbx, rax
+    pop rax
+    add rax, rbx
+    push rax
+    mov rax, [rbp - 48]
+    mov rbx, rax
+    pop rax
+    add rax, rbx
+    push rax
+    mov rax, 1
+    mov rbx, rax
+    pop rax
+    add rax, rbx
+    push rax
+    mov rax, 0
+    mov rsi, rax
+    pop rdi
+    call mem_write8
     mov rax, 1
     push rax
     mov rax, [rbp - 16]
     mov rsi, rax
     pop rdi
     call disk_write
-    lea rax, [rel str_27]
+    lea rax, [rel str_17]
     mov rdi, rax
     call print_str
-    call print_newline
-    jmp L23
-L20:
-    push rax
-    mov rax, 1
-    mov rbx, rax
-    pop rax
-    cmp rax, rbx
-    sete al
-    movzx rax, al
-    cmp rax, 0
-    je L24
+    mov rax, [rbp - 32]
     mov rdi, rax
     call print_str
     call print_newline
     jmp L25
-L24:
+L16:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_18]
+    mov rsi, rax
+    pop rdi
+    call str_eq
     push rax
     mov rax, 1
     mov rbx, rax
@@ -475,28 +495,60 @@ L24:
     movzx rax, al
     cmp rax, 0
     je L26
-    call clear_screen
-    lea rax, [rel str_28]
+    lea rax, [rel str_19]
     mov rdi, rax
     call print_str
-    call print_newline
-    jmp L27
-L26:
+    mov rax, 0
+    mov [rbp - 56], rax
+L27:
+    mov rax, [rbp - 56]
+    push rax
+    mov rax, 512
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    setl al
+    movzx rax, al
+    cmp rax, 0
+    je L28
+    mov rax, [rbp - 16]
+    push rax
+    mov rax, [rbp - 56]
+    mov rbx, rax
+    pop rax
+    add rax, rbx
+    push rax
+    mov rax, 0
+    mov rsi, rax
+    pop rdi
+    call mem_write8
+    mov rax, [rbp - 56]
     push rax
     mov rax, 1
     mov rbx, rax
     pop rax
-    cmp rax, rbx
-    sete al
-    movzx rax, al
-    cmp rax, 0
-    je L28
-    lea rax, [rel str_29]
+    add rax, rbx
+    mov [rbp - 56], rax
+    jmp L27
+L28:
+    mov rax, 1
+    push rax
+    mov rax, [rbp - 16]
+    mov rsi, rax
+    pop rdi
+    call disk_write
+    lea rax, [rel str_20]
     mov rdi, rax
     call print_str
-    call reboot
+    call print_newline
     jmp L29
-L28:
+L26:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_21]
+    mov rsi, rax
+    pop rdi
+    call str_eq
     push rax
     mov rax, 1
     mov rbx, rax
@@ -506,39 +558,22 @@ L28:
     movzx rax, al
     cmp rax, 0
     je L30
-    lea rax, [rel str_30]
-    mov rdi, rax
-    call print_str
-    call shutdown
     jmp L31
 L30:
-    push rax
-    mov rax, 1
-    mov rbx, rax
-    pop rax
-    cmp rax, rbx
-    sete al
-    movzx rax, al
-    cmp rax, 0
-    je L32
-    jmp L33
-L32:
-    lea rax, [rel str_31]
+    lea rax, [rel str_22]
     mov rdi, rax
     call print_str
     mov rax, [rbp - 8]
     mov rdi, rax
     call print_str
     call print_newline
-L33:
 L31:
 L29:
-L27:
 L25:
-L23:
-L19:
 L15:
 L13:
+L9:
+L7:
 L5:
 L3:
     jmp L0
@@ -575,46 +610,6 @@ print_int:
     mov [rel vga_cursor], r8d
     dec rcx
     jnz .int_print
-    pop r9
-    pop r8
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-    ret
-
-print_hex:
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    push r8
-    push r9
-    mov rax, rdi
-    mov rbx, 16
-    xor rcx, rcx
-.hex_div:
-    xor rdx, rdx
-    div rbx
-    cmp dl, 10
-    jl .hex_num
-    add dl, 39
-.hex_num:
-    add dl, '0'
-    push rdx
-    inc rcx
-    test rax, rax
-    jnz .hex_div
-.hex_print:
-    pop rdx
-    mov r8d, [rel vga_cursor]
-    lea r9, [0xb8000 + r8]
-    mov [r9], dl
-    mov byte [r9+1], 0x0f
-    add r8, 2
-    mov [rel vga_cursor], r8d
-    dec rcx
-    jnz .hex_print
     pop r9
     pop r8
     pop rdx
@@ -806,10 +801,6 @@ str_copy:
     pop rax
     ret
 
-get_heap:
-    mov rax, [rel heap_ptr]
-    ret
-
 reboot:
     mov al, 0xFE
     out 0x64, al
@@ -835,8 +826,16 @@ disk_read:
     test al, 0x80
     jnz .wait_bsy_read
     mov dx, 0x1F6
-    mov al, 0xE0
+    mov eax, edi
+    shr eax, 24
+    and al, 0x0F
+    or al, 0xE0
     out dx, al
+    mov dx, 0x1F7
+    in al, dx
+    in al, dx
+    in al, dx
+    in al, dx
     mov dx, 0x1F2
     mov al, 1
     out dx, al
@@ -850,12 +849,6 @@ disk_read:
     mov dx, 0x1F5
     mov eax, edi
     shr eax, 16
-    out dx, al
-    mov dx, 0x1F6
-    mov eax, edi
-    shr eax, 24
-    and al, 0x0F
-    or al, 0xE0
     out dx, al
     mov dx, 0x1F7
     mov al, 0x20
@@ -872,6 +865,11 @@ disk_read:
     add rdi, 2
     dec ecx
     jnz .read_loop
+    mov dx, 0x1F7
+.wait_done_read:
+    in al, dx
+    test al, 0x80
+    jnz .wait_done_read
     pop rsi
     pop rdi
     pop rdx
@@ -893,8 +891,16 @@ disk_write:
     test al, 0x80
     jnz .wait_bsy_write
     mov dx, 0x1F6
-    mov al, 0xE0
+    mov eax, edi
+    shr eax, 24
+    and al, 0x0F
+    or al, 0xE0
     out dx, al
+    mov dx, 0x1F7
+    in al, dx
+    in al, dx
+    in al, dx
+    in al, dx
     mov dx, 0x1F2
     mov al, 1
     out dx, al
@@ -908,12 +914,6 @@ disk_write:
     mov dx, 0x1F5
     mov eax, edi
     shr eax, 16
-    out dx, al
-    mov dx, 0x1F6
-    mov eax, edi
-    shr eax, 24
-    and al, 0x0F
-    or al, 0xE0
     out dx, al
     mov dx, 0x1F7
     mov al, 0x30
@@ -930,47 +930,17 @@ disk_write:
     add rdi, 2
     dec ecx
     jnz .write_loop
+    mov dx, 0x1F7
+    mov al, 0xE7
+    out dx, al
+.wait_done_write:
+    in al, dx
+    test al, 0x80
+    jnz .wait_done_write
     pop rsi
     pop rdi
     pop rdx
     pop rcx
-    pop rbx
-    ret
-
-pci_read32:
-    push rbx
-    shl rdi, 16
-    shl rsi, 11
-    shl rdx, 8
-    mov rbx, rdi
-    or rbx, rsi
-    or rbx, rdx
-    or rbx, rcx
-    or rbx, 0x80000000
-    mov dx, 0xCF8
-    mov eax, ebx
-    out dx, eax
-    mov dx, 0xCFC
-    in eax, dx
-    pop rbx
-    ret
-
-pci_write32:
-    push rbx
-    shl rdi, 16
-    shl rsi, 11
-    shl rdx, 8
-    mov rbx, rdi
-    or rbx, rsi
-    or rbx, rdx
-    or rbx, rcx
-    or rbx, 0x80000000
-    mov dx, 0xCF8
-    mov eax, ebx
-    out dx, eax
-    mov dx, 0xCFC
-    mov eax, r8d
-    out dx, eax
     pop rbx
     ret
 
@@ -1056,38 +1026,29 @@ gdt64_ptr:
 
 scancode_map: db 0,0,'1','2','3','4','5','6','7','8','9','0','-','=',8,9,'q','w','e','r','t','y','u','i','o','p','[',']',10,0,'a','s','d','f','g','h','j','k','l',';',39,'`',0,92,'z','x','c','v','b','n','m',',','.','/',0,'*',0,' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 scancode_map_shift: db 0,0,'!','@','#','$','%','^','&','*','(',')','_','+',8,9,'Q','W','E','R','T','Y','U','I','O','P','{','}',10,0,'A','S','D','F','G','H','J','K','L',':','"','~',0,'|','Z','X','C','V','B','N','M','<','>','?',0,'*',0,' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-str_2: db `Available commands:`, 0
-str_30: db `Shutting down...`, 0
-str_22: db `0`, 0
-str_4: db `  sysinfo   - Display system information`, 0
-str_31: db `command not found: `, 0
-str_5: db `  hexdump   - Dump Sector 1 as Hexadecimal`, 0
+str_4: db `clear`, 0
+str_5: db `Donky OS Shell v2.4 (DonkyFS)`, 0
+str_17: db `Created file: `, 0
+str_2: db `help`, 0
+str_22: db `command not found: `, 0
 str_1: db `root@donky:~# `, 0
-str_13: db `========================================`, 0
-str_9: db `  echo      - Print text to screen`, 0
-str_17: db `  RAM Mapped: 4 GB`, 0
-str_24: db `Clearing Sector 1...`, 0
-str_18: db `  Heap Start: 0x200000`, 0
-str_10: db `  clear     - Clear screen`, 0
-str_8: db `  mkfs      - Format RAM disk`, 0
-str_29: db `Rebooting...`, 0
-str_20: db `========================================`, 0
-str_14: db `  OS: DonkyOS v2.0`, 0
-str_0: db `Donky OS Shell v2.0 (Donk Edition)`, 0
-str_3: db `  help      - Show this menu`, 0
-str_11: db `  reboot    - Restart machine`, 0
-str_23: db ` `, 0
-str_25: db `Done.`, 0
-str_6: db `  cat       - Read RAM disk contents`, 0
-str_12: db `  shutdown  - Power off`, 0
-str_21: db `Hexdump of Sector 1:`, 0
-str_15: db `  Kernel: x86_64 (64-bit Long Mode)`, 0
-str_16: db `  Compiler: Donky Self-Hosted`, 0
-str_27: db `Formatted Sector 1.`, 0
-str_28: db `Donky OS Shell v2.0 (Donk Edition)`, 0
-str_19: db `  Disk: ATA PIO Driver (Primary Master)`, 0
-str_7: db `  rm        - Clear RAM disk`, 0
-str_26: db `Formatting...`, 0
+str_9: db `Shutting down...`, 0
+str_15: db `-----------------`, 0
+str_19: db `Clearing Directory...`, 0
+str_7: db `Rebooting...`, 0
+str_11: db `Formatting DonkyFS...`, 0
+str_10: db `mkfs`, 0
+str_3: db `Commands: help, clear, reboot, shutdown, ls, touch <name>, rm, mkfs`, 0
+str_14: db `--- Directory ---`, 0
+str_18: db `rm`, 0
+str_0: db `Donky OS Shell v2.4 (DonkyFS)`, 0
+str_6: db `reboot`, 0
+str_12: db `Formatted Sector 1.`, 0
+str_8: db `shutdown`, 0
+str_13: db `ls`, 0
+str_16: db `touch `, 0
+str_20: db `Directory cleared.`, 0
+str_21: db ``, 0
 section .note.Xen note alloc
 align 4
     dd 4

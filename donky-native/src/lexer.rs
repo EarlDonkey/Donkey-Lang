@@ -1,8 +1,9 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
     Number, String, StringInterp, Ident,
-    Let, Fn, If, Else, While, For, In, Return, Print, True, False, Div, Break, Continue, Try, Catch, Throw, Import, Struct,
+    Let, Fn, If, Else, While, For, In, Return, Print, True, False, Div, Break, Continue, Try, Catch, Throw, Import, Struct, Asm,
     Plus, Minus, Star, Slash, Percent, Bang, And, Or, Eq, EqEq, NotEq, Lt, LtEq, Gt, GtEq,
+    PlusEq, MinusEq, StarEq, SlashEq, PlusPlus, MinusMinus, Question,
     LParen, RParen, LBrace, RBrace, LBracket, RBracket, Semi, Comma, Colon, Dot, Eof,
 }
 
@@ -33,34 +34,21 @@ impl Lexer {
         }
     }
 
-    fn at_end(&self) -> bool { 
-        self.pos >= self.source.len() 
-    }
+    fn at_end(&self) -> bool { self.pos >= self.source.len() }
     
     fn peek(&self, offset: usize) -> char {
-        if self.pos + offset >= self.source.len() { 
-            '\0' 
-        } else { 
-            self.source[self.pos + offset] 
-        }
+        if self.pos + offset >= self.source.len() { '\0' } else { self.source[self.pos + offset] }
     }
 
     fn advance(&mut self) -> char {
         let ch = self.source[self.pos];
         self.pos += 1;
-        if ch == '\n' {
-            self.line += 1;
-            self.col = 1;
-        } else {
-            self.col += 1;
-        }
+        if ch == '\n' { self.line += 1; self.col = 1; } else { self.col += 1; }
         ch
     }
 
     fn match_char(&mut self, expected: char) -> bool {
-        if self.at_end() || self.source[self.pos] != expected { 
-            return false; 
-        }
+        if self.at_end() || self.source[self.pos] != expected { return false; }
         self.advance();
         true
     }
@@ -71,15 +59,9 @@ impl Lexer {
         while !self.at_end() {
             let ch = self.peek(0);
             
-            // Skip whitespace and comments
-            if ch.is_whitespace() { 
-                self.advance(); 
-                continue; 
-            }
+            if ch.is_whitespace() { self.advance(); continue; }
             if ch == '/' && self.peek(1) == '/' {
-                while self.peek(0) != '\n' && !self.at_end() { 
-                    self.advance(); 
-                }
+                while self.peek(0) != '\n' && !self.at_end() { self.advance(); }
                 continue;
             }
 
@@ -93,8 +75,11 @@ impl Lexer {
                 '[' => TokenType::LBracket, ']' => TokenType::RBracket,
                 ';' => TokenType::Semi, ',' => TokenType::Comma,
                 ':' => TokenType::Colon, '.' => TokenType::Dot,
-                '+' => TokenType::Plus, '-' => TokenType::Minus,
-                '*' => TokenType::Star, '/' => TokenType::Slash,
+                '?' => TokenType::Question,
+                '+' => if self.match_char('=') { TokenType::PlusEq } else if self.match_char('+') { TokenType::PlusPlus } else { TokenType::Plus },
+                '-' => if self.match_char('=') { TokenType::MinusEq } else if self.match_char('-') { TokenType::MinusMinus } else { TokenType::Minus },
+                '*' => if self.match_char('=') { TokenType::StarEq } else { TokenType::Star },
+                '/' => if self.match_char('=') { TokenType::SlashEq } else { TokenType::Slash },
                 '%' => TokenType::Percent,
                 '=' => if self.match_char('=') { TokenType::EqEq } else { TokenType::Eq },
                 '!' => if self.match_char('=') { TokenType::NotEq } else { TokenType::Bang },
@@ -123,7 +108,7 @@ impl Lexer {
                         }
                     }
                     if self.at_end() { return Err("Unterminated string".into()); }
-                    self.advance(); // closing quote
+                    self.advance();
                     
                     let ttype = if has_interp { TokenType::StringInterp } else { TokenType::String };
                     tokens.push(Token { 
@@ -161,7 +146,7 @@ impl Lexer {
                             "true" => TokenType::True, "false" => TokenType::False, "div" => TokenType::Div,
                             "break" => TokenType::Break, "continue" => TokenType::Continue, "try" => TokenType::Try,
                             "catch" => TokenType::Catch, "throw" => TokenType::Throw, "import" => TokenType::Import,
-                            "struct" => TokenType::Struct,
+                            "struct" => TokenType::Struct, "asm" => TokenType::Asm,
                             _ => TokenType::Ident,
                         };
                         tokens.push(Token { 

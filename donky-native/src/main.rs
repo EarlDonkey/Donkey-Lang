@@ -3,6 +3,7 @@ mod parser;
 mod ast;
 mod interpreter;
 mod vm;
+mod heap;
 mod package;
 
 use std::env;

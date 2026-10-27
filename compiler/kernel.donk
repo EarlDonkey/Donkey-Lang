@@ -1,99 +1,20 @@
-print("Donky OS Shell v2.0 (Donk Edition)");
+print("Donky OS Shell v2.4 (DonkyFS)");
 print_newline();
 print_newline();
 
 let buf = alloc(128);
-let disk_buf = alloc(512); 
+let disk_buf = alloc(512);
 
 while 1 == 1 {
     print("root@donky:~# ");
     read_line(buf);
 
     if str_eq(buf, "help") == 1 {
-        print("Available commands:");
-        print_newline();
-        print("  help      - Show this menu");
-        print_newline();
-        print("  sysinfo   - Display system information");
-        print_newline();
-        print("  hexdump   - Dump Sector 1 as Hexadecimal");
-        print_newline();
-        print("  cat       - Read RAM disk contents");
-        print_newline();
-        print("  rm        - Clear RAM disk");
-        print_newline();
-        print("  mkfs      - Format RAM disk");
-        print_newline();
-        print("  echo      - Print text to screen");
-        print_newline();
-        print("  clear     - Clear screen");
-        print_newline();
-        print("  reboot    - Restart machine");
-        print_newline();
-        print("  shutdown  - Power off");
-        print_newline();
-    } else if str_eq(buf, "sysinfo") == 1 {
-        print("========================================");
-        print_newline();
-        print("  OS: DonkyOS v2.0");
-        print_newline();
-        print("  Kernel: x86_64 (64-bit Long Mode)");
-        print_newline();
-        print("  Compiler: Donky Self-Hosted");
-        print_newline();
-        print("  RAM Mapped: 4 GB");
-        print_newline();
-        print("  Heap Start: 0x200000");
-        print_newline();
-        print("  Disk: ATA PIO Driver (Primary Master)");
-        print_newline();
-        print("========================================");
-        print_newline();
-    } else if str_eq(buf, "hexdump") == 1 {
-        print("Hexdump of Sector 1:");
-        print_newline();
-        disk_read(1, disk_buf);
-        let i = 0;
-        while i < 64 {
-            let b = mem_read8(disk_buf + i);
-            if b < 16 { print("0"); }
-            print_hex(b);
-            print(" ");
-            if (i + 1) % 16 == 0 { print_newline(); }
-            i = i + 1;
-        }
-        print_newline();
-    } else if str_eq(buf, "cat") == 1 {
-        disk_read(1, disk_buf);
-        print_str(disk_buf);
-        print_newline();
-    } else if str_eq(buf, "rm") == 1 {
-        print("Clearing Sector 1...");
-        let i = 0;
-        while i < 512 {
-            mem_write8(disk_buf + i, 0);
-            i = i + 1;
-        }
-        disk_write(1, disk_buf);
-        print("Done.");
-        print_newline();
-    } else if str_eq(buf, "mkfs") == 1 {
-        print("Formatting...");
-        let i = 0;
-        while i < 512 {
-            mem_write8(disk_buf + i, 0);
-            i = i + 1;
-        }
-        str_copy(disk_buf, "DonkyFS initialized.\n");
-        disk_write(1, disk_buf);
-        print("Formatted Sector 1.");
-        print_newline();
-    } else if str_starts_with(buf, "echo ") == 1 {
-        print_str(str_skip(buf, 5));
+        print("Commands: help, clear, reboot, shutdown, ls, touch <name>, rm, mkfs");
         print_newline();
     } else if str_eq(buf, "clear") == 1 {
         clear_screen();
-        print("Donky OS Shell v2.0 (Donk Edition)");
+        print("Donky OS Shell v2.4 (DonkyFS)");
         print_newline();
     } else if str_eq(buf, "reboot") == 1 {
         print("Rebooting...");
@@ -101,8 +22,60 @@ while 1 == 1 {
     } else if str_eq(buf, "shutdown") == 1 {
         print("Shutting down...");
         shutdown();
+    } else if str_eq(buf, "mkfs") == 1 {
+        print("Formatting DonkyFS...");
+        let i = 0;
+        while i < 512 {
+            mem_write8(disk_buf + i, 0);
+            i = i + 1;
+        }
+        disk_write(1, disk_buf);
+        print("Formatted Sector 1.");
+        print_newline();
+    } else if str_eq(buf, "ls") == 1 {
+        disk_read(1, disk_buf);
+        print("--- Directory ---");
+        print_newline();
+        print_str(disk_buf);
+        print("-----------------");
+        print_newline();
+    } else if str_starts_with(buf, "touch ") == 1 {
+        let fname = str_skip(buf, 6);
+        disk_read(1, disk_buf);
+        
+        let i = 0;
+        while i < 512 {
+            if mem_read8(disk_buf + i) == 0 { break; }
+            i = i + 1;
+        }
+        
+        str_copy(disk_buf + i, fname);
+        
+        let j = 0;
+        while j < 512 {
+            if mem_read8(disk_buf + i + j) == 0 { break; }
+            j = j + 1;
+        }
+        
+        mem_write8(disk_buf + i + j, 10);
+        mem_write8(disk_buf + i + j + 1, 0);
+        
+        disk_write(1, disk_buf);
+        print("Created file: ");
+        print_str(fname);
+        print_newline();
+    } else if str_eq(buf, "rm") == 1 {
+        print("Clearing Directory...");
+        let i = 0;
+        while i < 512 {
+            mem_write8(disk_buf + i, 0);
+            i = i + 1;
+        }
+        disk_write(1, disk_buf);
+        print("Directory cleared.");
+        print_newline();
     } else if str_eq(buf, "") == 1 {
-        // Do nothing on empty enter
+        // Empty enter
     } else {
         print("command not found: ");
         print_str(buf);

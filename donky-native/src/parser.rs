@@ -76,6 +76,14 @@ impl Parser {
             return Ok(Stmt::Throw(expr));
         }
 
+        if self.match_token(&[TokenType::Asm]) {
+            self.consume(TokenType::LParen, "Expected '(' after 'asm'")?;
+            let code = self.consume(TokenType::String, "Expected assembly string literal")?.literal.clone().unwrap();
+            self.consume(TokenType::RParen, "Expected ')'")?;
+            self.consume(TokenType::Semi, "Expected ';'")?;
+            return Ok(Stmt::Asm(code));
+        }
+
         if self.match_token(&[TokenType::Struct]) {
             let name = self.consume(TokenType::Ident, "Expected struct name")?.lexeme.clone();
             self.consume(TokenType::LBrace, "Expected '{'")?;
@@ -163,6 +171,39 @@ impl Parser {
         if self.match_token(&[TokenType::Break]) { self.consume(TokenType::Semi, "Expected ';'")?; return Ok(Stmt::Break); }
         if self.match_token(&[TokenType::Continue]) { self.consume(TokenType::Semi, "Expected ';'")?; return Ok(Stmt::Continue); }
 
+        // Desugar ++ and --
+        if self.check(TokenType::Ident) && self.peek_n(1).ttype == TokenType::PlusPlus {
+            let name = self.advance().lexeme.clone();
+            self.advance(); // ++
+            self.consume(TokenType::Semi, "Expected ';'")?;
+            return Ok(Stmt::Assign(name.clone(), Expr::Binary(Box::new(Expr::Ident(name)), TokenType::Plus, Box::new(Expr::Number(1.0)))));
+        }
+        if self.check(TokenType::Ident) && self.peek_n(1).ttype == TokenType::MinusMinus {
+            let name = self.advance().lexeme.clone();
+            self.advance(); // --
+            self.consume(TokenType::Semi, "Expected ';'")?;
+            return Ok(Stmt::Assign(name.clone(), Expr::Binary(Box::new(Expr::Ident(name)), TokenType::Minus, Box::new(Expr::Number(1.0)))));
+        }
+
+        // Desugar +=, -=, *=, /=
+        if self.check(TokenType::Ident) {
+            let next = self.peek_n(1).ttype.clone();
+            if next == TokenType::PlusEq || next == TokenType::MinusEq || next == TokenType::StarEq || next == TokenType::SlashEq {
+                let name = self.advance().lexeme.clone();
+                let op_token = self.advance().ttype.clone();
+                let value = self.expression(0)?;
+                self.consume(TokenType::Semi, "Expected ';'")?;
+                let bin_op = match op_token {
+                    TokenType::PlusEq => TokenType::Plus,
+                    TokenType::MinusEq => TokenType::Minus,
+                    TokenType::StarEq => TokenType::Star,
+                    TokenType::SlashEq => TokenType::Slash,
+                    _ => unreachable!(),
+                };
+                return Ok(Stmt::Assign(name.clone(), Expr::Binary(Box::new(Expr::Ident(name)), bin_op, Box::new(value))));
+            }
+        }
+
         if self.check(TokenType::Ident) && self.peek_n(1).ttype == TokenType::Eq {
             let name = self.advance().lexeme.clone();
             self.advance(); // =
@@ -211,6 +252,14 @@ impl Parser {
             left = Expr::Binary(Box::new(left), op_token, Box::new(right));
         }
 
+        // Ternary Operator
+        if min_bp <= 2 && self.match_token(&[TokenType::Question]) {
+            let then_branch = self.expression(0)?;
+            self.consume(TokenType::Colon, "Expected ':' in ternary")?;
+            let else_branch = self.expression(2)?;
+            left = Expr::Ternary(Box::new(left), Box::new(then_branch), Box::new(else_branch));
+        }
+
         Ok(left)
     }
 
@@ -253,23 +302,6 @@ impl Parser {
             }
             TokenType::True => Ok(Expr::Bool(true)),
             TokenType::False => Ok(Expr::Bool(false)),
-            // <--- NEW: anonymous function / lambda in expression position
-            TokenType::Fn => {
-                self.consume(TokenType::LParen, "Expected '(' after 'fn'")?;
-                let mut params = Vec::new();
-                if !self.check(TokenType::RParen) {
-                    loop {
-                        params.push(self.consume(TokenType::Ident, "Expected parameter name")?.lexeme.clone());
-                        if !self.match_token(&[TokenType::Comma]) { break; }
-                    }
-                }
-                self.consume(TokenType::RParen, "Expected ')'")?;
-                self.match_token(&[TokenType::Minus]);
-                self.match_token(&[TokenType::Gt]);
-                if self.check(TokenType::Ident) { self.advance(); }
-                let body = Box::new(self.statement()?);
-                Ok(Expr::Function(params, body))
-            }
             TokenType::Ident => {
                 let name = token.lexeme;
                 if self.match_token(&[TokenType::LParen]) {

@@ -1,0 +1,34 @@
+print("=== Testing Donky Tree-Walker with Custom GC ===");
+
+// 1. Basic Math and Compound Assignments
+let x = 10;
+x += 5;
+x++;
+print("Math test: " + str(x)); // Expect: 16
+
+// 2. Ternary Operator
+let status = x > 15 ? "High" : "Low";
+print("Ternary test: " + status); // Expect: High
+
+// 3. Arrays (Heap Allocation)
+let arr = [1, 2, 3];
+push(arr, 4);
+arr[0] = 99;
+print("Array test: len=" + str(len(arr)) + ", first=" + str(arr[0])); // Expect: len=4, first=99
+
+// 4. Maps (Heap Allocation)
+let map = {"name": "Donky", "version": 3};
+print("Map test: " + map["name"]); // Expect: Donky
+
+// 5. Loops and Variables
+let sum = 0;
+for i in [10, 20, 30] {
+    sum += i;
+}
+print("Loop test: sum=" + str(sum)); // Expect: sum=60
+
+// 6. Functions
+fn greet(name) -> str {
+    return "Hello, " + name;
+}
+print("Function test: " + greet("World")); // Expect: Hello, World
