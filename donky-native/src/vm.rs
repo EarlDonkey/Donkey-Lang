@@ -2,7 +2,7 @@ use crate::ast::{Expr, Stmt};
 use crate::lexer::{TokenType, Lexer};
 use crate::parser::Parser;
 use crate::heap::{Value, MapKey, Heap, HeapObject};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -30,12 +30,159 @@ pub enum OpCode {
     Interpolate(usize),
     TryStart(usize), TryEnd, Throw,
     Dup, Pop, Halt,
+    // Round 1 superinstructions
+    BinLocals(TokenType, u32, u32),
+    IncLocal(u32, f64),
+    AddLocalConst(u32, f64, u32),
+    // Round 2 superinstructions
+    JumpIfLocalCmpFalse(TokenType, u32, u32, usize),
+    AddLocalMulLocal(u32, u32, u32),
+    IncLocalJump(u32, f64, usize),
 }
 
-struct LoopContext {
-    continue_jumps: Vec<usize>,
-    break_jumps: Vec<usize>,
+// ===================== PEEPHOLE =====================
+
+fn bin_op_of(op: &OpCode) -> Option<TokenType> {
+    match op {
+        OpCode::Add => Some(TokenType::Plus),
+        OpCode::Sub => Some(TokenType::Minus),
+        OpCode::Mul => Some(TokenType::Star),
+        OpCode::Div => Some(TokenType::Slash),
+        OpCode::Eq => Some(TokenType::EqEq),
+        OpCode::NotEq => Some(TokenType::NotEq),
+        OpCode::Lt => Some(TokenType::Lt),
+        OpCode::Gt => Some(TokenType::Gt),
+        OpCode::LtEq => Some(TokenType::LtEq),
+        OpCode::GtEq => Some(TokenType::GtEq),
+        _ => None,
+    }
 }
+
+fn is_comparison(op: &TokenType) -> bool {
+    matches!(op, TokenType::EqEq | TokenType::NotEq | TokenType::Lt | TokenType::Gt | TokenType::LtEq | TokenType::GtEq)
+}
+
+fn peephole(code: Vec<OpCode>) -> Vec<OpCode> {
+    let mut targets: HashSet<usize> = HashSet::new();
+    for op in &code {
+        match op {
+            OpCode::Jump(t) | OpCode::JumpIfFalse(t) | OpCode::TryStart(t)
+            | OpCode::JumpIfLocalCmpFalse(_, _, _, t) | OpCode::IncLocalJump(_, _, t) => { targets.insert(*t); }
+            _ => {}
+        }
+    }
+
+    let mut new_code: Vec<OpCode> = Vec::with_capacity(code.len());
+    let mut old_to_new: Vec<usize> = vec![0; code.len() + 1];
+    let mut i = 0;
+    while i < code.len() {
+        old_to_new[i] = new_code.len();
+
+        let clean = |i: usize, n: usize| -> bool {
+            !(1..n).any(|j| i + j < code.len() && targets.contains(&(i + j)))
+        };
+
+        // Fusion A: GetLocal(a); GetLocal(b); <binop> -> BinLocals(op, a, b)
+        if i + 2 < code.len() && clean(i, 3) {
+            if let (OpCode::GetLocal(a), OpCode::GetLocal(b)) = (&code[i], &code[i + 1]) {
+                if let Some(tok) = bin_op_of(&code[i + 2]) {
+                    new_code.push(OpCode::BinLocals(tok, *a as u32, *b as u32));
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+
+        // Fusion D: BinLocals(cmp, a, b); JumpIfFalse(target) -> JumpIfLocalCmpFalse(cmp, a, b, target)
+        if i + 1 < code.len() && clean(i, 2) {
+            if let OpCode::BinLocals(op, a, b) = &code[i] {
+                if is_comparison(op) {
+                    if let OpCode::JumpIfFalse(target) = &code[i + 1] {
+                        new_code.push(OpCode::JumpIfLocalCmpFalse(op.clone(), *a, *b, *target));
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Fusion E: GetLocal(dst); BinLocals(Mul, a, b); Add; SetLocal(dst) -> AddLocalMulLocal(dst, a, b)
+        if i + 3 < code.len() && clean(i, 4) {
+            if let (OpCode::GetLocal(dst), OpCode::BinLocals(TokenType::Star, a, b), OpCode::Add, OpCode::SetLocal(dst2)) =
+                (&code[i], &code[i + 1], &code[i + 2], &code[i + 3])
+            {
+                if dst == dst2 {
+                    new_code.push(OpCode::AddLocalMulLocal(*dst as u32, *a as u32, *b as u32));
+                    i += 4;
+                    continue;
+                }
+            }
+        }
+
+        // Fusion F: IncLocal(slot, delta); Jump(target) -> IncLocalJump(slot, delta, target)
+        if i + 1 < code.len() && clean(i, 2) {
+            if let (OpCode::IncLocal(slot, delta), OpCode::Jump(target)) = (&code[i], &code[i + 1]) {
+                new_code.push(OpCode::IncLocalJump(*slot, *delta, *target));
+                i += 2;
+                continue;
+            }
+        }
+
+        // Fusion B: GetLocal(a); Constant(Number(k)); Add|Sub; SetLocal(a) -> IncLocal(a, ±k)
+        if i + 3 < code.len() && clean(i, 4) {
+            if let (OpCode::GetLocal(a), OpCode::Constant(Value::Number(k)), OpCode::SetLocal(b)) =
+                (&code[i], &code[i + 1], &code[i + 3])
+            {
+                if a == b {
+                    match &code[i + 2] {
+                        OpCode::Add => { new_code.push(OpCode::IncLocal(*a as u32, *k)); i += 4; continue; }
+                        OpCode::Sub => { new_code.push(OpCode::IncLocal(*a as u32, -*k)); i += 4; continue; }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Fusion C: GetLocal(a); Constant(Number(k)); Add|Sub; SetLocal(b) -> AddLocalConst(a, ±k, b)
+        if i + 3 < code.len() && clean(i, 4) {
+            if let (OpCode::GetLocal(a), OpCode::Constant(Value::Number(k)), OpCode::SetLocal(b)) =
+                (&code[i], &code[i + 1], &code[i + 3])
+            {
+                if a != b {
+                    match &code[i + 2] {
+                        OpCode::Add => { new_code.push(OpCode::AddLocalConst(*a as u32, *k, *b as u32)); i += 4; continue; }
+                        OpCode::Sub => { new_code.push(OpCode::AddLocalConst(*a as u32, -*k, *b as u32)); i += 4; continue; }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        new_code.push(code[i].clone());
+        i += 1;
+    }
+    old_to_new[code.len()] = new_code.len();
+
+    for op in new_code.iter_mut() {
+        match op {
+            OpCode::Jump(t) | OpCode::JumpIfFalse(t) | OpCode::TryStart(t) => {
+                if *t <= code.len() { *t = old_to_new[*t]; }
+            }
+            OpCode::JumpIfLocalCmpFalse(_, _, _, t) => {
+                if *t <= code.len() { *t = old_to_new[*t]; }
+            }
+            OpCode::IncLocalJump(_, _, t) => {
+                if *t <= code.len() { *t = old_to_new[*t]; }
+            }
+            _ => {}
+        }
+    }
+    new_code
+}
+
+// ===================== COMPILER =====================
+
+struct LoopContext { continue_jumps: Vec<usize>, break_jumps: Vec<usize> }
 
 pub struct Compiler {
     code: Vec<OpCode>,
@@ -53,7 +200,20 @@ impl Compiler {
     pub fn compile(mut self, stmts: Vec<Stmt>) -> (Vec<OpCode>, Vec<Vec<OpCode>>) {
         for stmt in stmts { self.compile_stmt(stmt); }
         self.code.push(OpCode::Halt);
-        (self.code, self.functions)
+        let before_main = self.code.len();
+        let main = peephole(self.code);
+        if std::env::var("DONKY_DEBUG").is_ok() {
+            eprintln!("[PEEPHOLE] main {} -> {}", before_main, main.len());
+        }
+        let funcs: Vec<Vec<OpCode>> = self.functions.into_iter().map(|f| {
+            let before = f.len();
+            let after = peephole(f);
+            if std::env::var("DONKY_DEBUG").is_ok() {
+                eprintln!("[PEEPHOLE] func {} -> {}", before, after.len());
+            }
+            after
+        }).collect();
+        (main, funcs)
     }
 
     fn compile_stmt(&mut self, stmt: Stmt) {
@@ -85,15 +245,13 @@ impl Compiler {
                 if let Some(&slot) = self.locals.get(&name) { self.code.push(OpCode::SetLocal(slot)); }
             }
             Stmt::FieldSet(obj_expr, field, val_expr) => {
-                self.compile_expr(obj_expr);
-                self.compile_expr(val_expr);
+                self.compile_expr(obj_expr); self.compile_expr(val_expr);
                 self.code.push(OpCode::FieldSet(field));
             }
             Stmt::IndexSet(name, idx_expr, val_expr) => {
                 if let Some(&slot) = self.locals.get(&name) { self.code.push(OpCode::GetLocal(slot)); }
                 else { self.code.push(OpCode::Constant(Value::Null)); }
-                self.compile_expr(idx_expr);
-                self.compile_expr(val_expr);
+                self.compile_expr(idx_expr); self.compile_expr(val_expr);
                 self.code.push(OpCode::IndexSet);
             }
             Stmt::ExprStmt(expr) => { self.compile_expr(expr); self.code.push(OpCode::Pop); }
@@ -159,10 +317,7 @@ impl Compiler {
                 let ctx = self.loop_stack.pop().unwrap();
 
                 let incr_start = self.code.len();
-                self.code.push(OpCode::GetLocal(idx_slot));
-                self.code.push(OpCode::Constant(Value::Number(1.0)));
-                self.code.push(OpCode::Add);
-                self.code.push(OpCode::SetLocal(idx_slot));
+                self.code.push(OpCode::IncLocal(idx_slot as u32, 1.0));
                 self.code.push(OpCode::Jump(loop_start));
                 let end = self.code.len();
                 self.code[jump_if_false] = OpCode::JumpIfFalse(end);
@@ -229,10 +384,7 @@ impl Compiler {
                 if let Some(e) = expr { self.compile_expr(e); } else { self.code.push(OpCode::Constant(Value::Null)); }
                 self.code.push(OpCode::Return);
             }
-            Stmt::Throw(expr) => {
-                self.compile_expr(expr);
-                self.code.push(OpCode::Throw);
-            }
+            Stmt::Throw(expr) => { self.compile_expr(expr); self.code.push(OpCode::Throw); }
             Stmt::Try(try_block, err_name, catch_block) => {
                 let try_start = self.code.len();
                 self.code.push(OpCode::TryStart(0));
@@ -243,16 +395,14 @@ impl Compiler {
                 let handler_start = self.code.len();
                 self.code[try_start] = OpCode::TryStart(handler_start);
 
-                let err_slot = self.next_local;
-                self.next_local += 1;
+                let err_slot = self.next_local; self.next_local += 1;
                 let saved = self.locals.insert(err_name.clone(), err_slot);
                 self.code.push(OpCode::SetLocal(err_slot));
                 self.compile_stmt(*catch_block);
                 let end = self.code.len();
                 self.code[jump_over] = OpCode::Jump(end);
-
                 match saved {
-                    Some(old_slot) => { self.locals.insert(err_name, old_slot); }
+                    Some(old) => { self.locals.insert(err_name, old); }
                     None => { self.locals.remove(&err_name); }
                 }
             }
@@ -361,8 +511,7 @@ impl Compiler {
 
 fn is_builtin(name: &str) -> bool {
     matches!(name,
-        "str" | "num" | "type" | "len"
-        | "push" | "pop" | "keys"
+        "str" | "num" | "type" | "len" | "push" | "pop" | "keys"
         | "split" | "join" | "upper" | "lower" | "trim" | "replace" | "contains"
         | "str_eq" | "char_code" | "byte_at" | "byte_substr" | "bytes_to_str"
         | "read_file" | "write_file" | "file_exists" | "list_dir" | "mkdir"
@@ -370,6 +519,8 @@ fn is_builtin(name: &str) -> bool {
         | "tcp_listen" | "tcp_accept" | "tcp_read" | "tcp_write" | "tcp_close" | "http_get"
     )
 }
+
+// ===================== VM =====================
 
 struct Handler {
     ip: usize,
@@ -424,8 +575,8 @@ impl VM {
             }
             "len" => match args.get(0).unwrap_or(&Value::Null) {
                 Value::String(s) => Ok(Value::Number(s.len() as f64)),
-                Value::Array(idx) => { if let HeapObject::Array(arr) = self.heap.get(*idx) { Ok(Value::Number(arr.len() as f64)) } else { Err("Not array".to_string()) } }
-                Value::Map(idx) => { if let HeapObject::Map(map) = self.heap.get(*idx) { Ok(Value::Number(map.len() as f64)) } else { Err("Not map".to_string()) } }
+                Value::Array(idx) => if let HeapObject::Array(arr) = self.heap.get(*idx) { Ok(Value::Number(arr.len() as f64)) } else { Err("Not array".to_string()) },
+                Value::Map(idx) => if let HeapObject::Map(map) = self.heap.get(*idx) { Ok(Value::Number(map.len() as f64)) } else { Err("Not map".to_string()) },
                 _ => Err("len() expects collection".to_string()),
             },
             "push" => {
@@ -688,11 +839,6 @@ impl VM {
         let mut current_code = code.clone();
 
         while ip < current_code.len() {
-            if self.heap.needs_gc() {
-                let roots = self.get_roots();
-                self.heap.collect_garbage(&roots);
-            }
-
             match &current_code[ip] {
                 OpCode::Constant(v) => self.stack.push(v.clone()),
                 OpCode::Add => {
@@ -709,41 +855,116 @@ impl VM {
                 OpCode::Div => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); if let (Value::Number(x), Value::Number(y)) = (a, b) { self.stack.push(Value::Number(x / y)); } }
                 OpCode::Eq => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); self.stack.push(Value::Bool(a.to_string() == b.to_string())); }
                 OpCode::NotEq => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); self.stack.push(Value::Bool(a.to_string() != b.to_string())); }
-                OpCode::Lt => {
-                    let b = self.stack.pop().unwrap_or(Value::Null);
-                    let a = self.stack.pop().unwrap_or(Value::Null);
-                    match (&a, &b) {
-                        (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x < y)),
-                        _ => self.stack.push(Value::Bool(a.to_string() < b.to_string())),
-                    }
-                }
-                OpCode::Gt => {
-                    let b = self.stack.pop().unwrap_or(Value::Null);
-                    let a = self.stack.pop().unwrap_or(Value::Null);
-                    match (&a, &b) {
-                        (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x > y)),
-                        _ => self.stack.push(Value::Bool(a.to_string() > b.to_string())),
-                    }
-                }
-                OpCode::LtEq => {
-                    let b = self.stack.pop().unwrap_or(Value::Null);
-                    let a = self.stack.pop().unwrap_or(Value::Null);
-                    match (&a, &b) {
-                        (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x <= y)),
-                        _ => self.stack.push(Value::Bool(a.to_string() <= b.to_string())),
-                    }
-                }
-                OpCode::GtEq => {
-                    let b = self.stack.pop().unwrap_or(Value::Null);
-                    let a = self.stack.pop().unwrap_or(Value::Null);
-                    match (&a, &b) {
-                        (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x >= y)),
-                        _ => self.stack.push(Value::Bool(a.to_string() >= b.to_string())),
-                    }
-                }
+                OpCode::Lt => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x < y)), _ => self.stack.push(Value::Bool(a.to_string() < b.to_string())) } }
+                OpCode::Gt => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x > y)), _ => self.stack.push(Value::Bool(a.to_string() > b.to_string())) } }
+                OpCode::LtEq => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x <= y)), _ => self.stack.push(Value::Bool(a.to_string() <= b.to_string())) } }
+                OpCode::GtEq => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x >= y)), _ => self.stack.push(Value::Bool(a.to_string() >= b.to_string())) } }
                 OpCode::Negate => { let v = self.stack.pop().unwrap_or(Value::Null); if let Value::Number(n) = v { self.stack.push(Value::Number(-n)); } else { self.stack.push(Value::Null); } }
                 OpCode::Not => { let v = self.stack.pop().unwrap_or(Value::Null); if let Value::Bool(b) = v { self.stack.push(Value::Bool(!b)); } else { self.stack.push(Value::Null); } }
                 OpCode::Print => { let val = self.stack.pop().unwrap_or(Value::Null); println!("{}", val.to_string()); }
+
+                // --- Round 1 superinstructions ---
+                OpCode::BinLocals(op, a, b) => {
+                    let lv = &self.locals[*a as usize];
+                    let rv = &self.locals[*b as usize];
+                    let res = match op {
+                        TokenType::Plus => match (lv, rv) {
+                            (Value::Number(x), Value::Number(y)) => Value::Number(x + y),
+                            (Value::String(x), Value::String(y)) => Value::String(format!("{}{}", x, y)),
+                            _ => Value::Null,
+                        },
+                        TokenType::Minus => match (lv, rv) { (Value::Number(x), Value::Number(y)) => Value::Number(x - y), _ => Value::Null },
+                        TokenType::Star => match (lv, rv) { (Value::Number(x), Value::Number(y)) => Value::Number(x * y), _ => Value::Null },
+                        TokenType::Slash => match (lv, rv) { (Value::Number(x), Value::Number(y)) => Value::Number(x / y), _ => Value::Null },
+                        TokenType::EqEq => Value::Bool(match (lv, rv) {
+                            (Value::Number(x), Value::Number(y)) => x == y,
+                            (Value::String(x), Value::String(y)) => x == y,
+                            (Value::Bool(x), Value::Bool(y)) => x == y,
+                            _ => false,
+                        }),
+                        TokenType::NotEq => Value::Bool(match (lv, rv) {
+                            (Value::Number(x), Value::Number(y)) => x != y,
+                            (Value::String(x), Value::String(y)) => x != y,
+                            (Value::Bool(x), Value::Bool(y)) => x != y,
+                            _ => true,
+                        }),
+                        TokenType::Lt => match (lv, rv) {
+                            (Value::Number(x), Value::Number(y)) => Value::Bool(x < y),
+                            (Value::String(x), Value::String(y)) => Value::Bool(x < y),
+                            _ => Value::Null,
+                        },
+                        TokenType::Gt => match (lv, rv) {
+                            (Value::Number(x), Value::Number(y)) => Value::Bool(x > y),
+                            (Value::String(x), Value::String(y)) => Value::Bool(x > y),
+                            _ => Value::Null,
+                        },
+                        TokenType::LtEq => match (lv, rv) {
+                            (Value::Number(x), Value::Number(y)) => Value::Bool(x <= y),
+                            (Value::String(x), Value::String(y)) => Value::Bool(x <= y),
+                            _ => Value::Null,
+                        },
+                        TokenType::GtEq => match (lv, rv) {
+                            (Value::Number(x), Value::Number(y)) => Value::Bool(x >= y),
+                            (Value::String(x), Value::String(y)) => Value::Bool(x >= y),
+                            _ => Value::Null,
+                        },
+                        _ => Value::Null,
+                    };
+                    self.stack.push(res);
+                }
+                OpCode::IncLocal(slot, delta) => {
+                    if let Value::Number(n) = &mut self.locals[*slot as usize] { *n += delta; }
+                }
+                OpCode::AddLocalConst(a, k, b) => {
+                    let res = match &self.locals[*a as usize] {
+                        Value::Number(n) => Value::Number(n + k),
+                        _ => Value::Null,
+                    };
+                    self.locals[*b as usize] = res;
+                }
+
+                // --- Round 2 superinstructions ---
+                OpCode::JumpIfLocalCmpFalse(op, a, b, target) => {
+                    let lv = &self.locals[*a as usize];
+                    let rv = &self.locals[*b as usize];
+                    let cond = match op {
+                        TokenType::Lt => match (lv, rv) { (Value::Number(x), Value::Number(y)) => x < y, _ => false },
+                        TokenType::LtEq => match (lv, rv) { (Value::Number(x), Value::Number(y)) => x <= y, _ => false },
+                        TokenType::Gt => match (lv, rv) { (Value::Number(x), Value::Number(y)) => x > y, _ => false },
+                        TokenType::GtEq => match (lv, rv) { (Value::Number(x), Value::Number(y)) => x >= y, _ => false },
+                        TokenType::EqEq => match (lv, rv) {
+                            (Value::Number(x), Value::Number(y)) => x == y,
+                            (Value::String(x), Value::String(y)) => x == y,
+                            (Value::Bool(x), Value::Bool(y)) => x == y,
+                            _ => false,
+                        },
+                        TokenType::NotEq => match (lv, rv) {
+                            (Value::Number(x), Value::Number(y)) => x != y,
+                            (Value::String(x), Value::String(y)) => x != y,
+                            (Value::Bool(x), Value::Bool(y)) => x != y,
+                            _ => true,
+                        },
+                        _ => false,
+                    };
+                    if !cond { ip = *target; continue; }
+                }
+                OpCode::AddLocalMulLocal(dst, a, b) => {
+                    let prod = match (&self.locals[*a as usize], &self.locals[*b as usize]) {
+                        (Value::Number(x), Value::Number(y)) => Value::Number(x * y),
+                        _ => Value::Null,
+                    };
+                    let sum = match (&self.locals[*dst as usize], &prod) {
+                        (Value::Number(x), Value::Number(y)) => Value::Number(x + y),
+                        (Value::String(x), Value::String(y)) => Value::String(format!("{}{}", x, y)),
+                        _ => Value::Null,
+                    };
+                    self.locals[*dst as usize] = sum;
+                }
+                OpCode::IncLocalJump(slot, delta, target) => {
+                    if let Value::Number(n) = &mut self.locals[*slot as usize] { *n += delta; }
+                    ip = *target;
+                    continue;
+                }
 
                 OpCode::Interpolate(n) => {
                     if *n == 0 { self.stack.push(Value::String(String::new())); }
@@ -763,9 +984,12 @@ impl VM {
                 }
 
                 OpCode::Builtin(name, arg_count) => {
+                    if self.heap.needs_gc() {
+                        let roots = self.get_roots();
+                        self.heap.collect_garbage(&roots);
+                    }
                     let mut args = Vec::new();
                     for _ in 0..*arg_count { args.push(self.stack.pop().unwrap_or(Value::Null)); }
-                    //args.reverse();
                     let res = self.builtin(name, args)?;
                     self.stack.push(res);
                 }
@@ -787,7 +1011,6 @@ impl VM {
                 OpCode::MethodCall(method, arg_count) => {
                     let mut args = Vec::new();
                     for _ in 0..*arg_count { args.push(self.stack.pop().unwrap_or(Value::Null)); }
-                    //args.reverse();
                     let target = self.stack.pop().unwrap_or(Value::Null);
                     if let Value::Struct(idx) = target {
                         let struct_name = if let HeapObject::Struct(n, _) = self.heap.get(idx) { n.clone() } else { "".to_string() };
@@ -799,8 +1022,7 @@ impl VM {
                             final_args.extend(args);
                             self.locals = final_args;
                             current_code = self.functions[func_idx].clone();
-                            ip = 0;
-                            continue;
+                            ip = 0; continue;
                         }
                     }
                 }
@@ -810,12 +1032,10 @@ impl VM {
                     if let Value::Number(idx) = func_idx_val {
                         self.call_stack.push((ip, self.handlers.len()));
                         self.frames.push(std::mem::replace(&mut self.locals, Vec::new()));
-                        let mut new_locals: Vec<Value> = (0..*arg_count).map(|_| self.stack.pop().unwrap_or(Value::Null)).collect();
-                        //new_locals.reverse();
+                        let new_locals: Vec<Value> = (0..*arg_count).map(|_| self.stack.pop().unwrap_or(Value::Null)).collect();
                         self.locals = new_locals;
                         current_code = self.functions[idx as usize].clone();
-                        ip = 0;
-                        continue;
+                        ip = 0; continue;
                     }
                 }
                 OpCode::Return => {
@@ -848,14 +1068,17 @@ impl VM {
                         self.stack = h.stack;
                         self.stack.push(exc);
                         current_code = code.clone();
-                        ip = h.ip;
-                        continue;
+                        ip = h.ip; continue;
                     } else {
                         return Err(format!("Uncaught exception: {}", exc.to_string()));
                     }
                 }
 
                 OpCode::Array(size) => {
+                    if self.heap.needs_gc() {
+                        let roots = self.get_roots();
+                        self.heap.collect_garbage(&roots);
+                    }
                     let mut elements = Vec::new();
                     for _ in 0..*size { elements.push(self.stack.pop().unwrap_or(Value::Null)); }
                     elements.reverse();
@@ -863,6 +1086,10 @@ impl VM {
                     self.stack.push(Value::Array(idx));
                 }
                 OpCode::Map(size) => {
+                    if self.heap.needs_gc() {
+                        let roots = self.get_roots();
+                        self.heap.collect_garbage(&roots);
+                    }
                     let mut map = HashMap::new();
                     for _ in 0..*size {
                         let v = self.stack.pop().unwrap_or(Value::Null);
@@ -873,6 +1100,10 @@ impl VM {
                     self.stack.push(Value::Map(idx));
                 }
                 OpCode::Struct(name, fields) => {
+                    if self.heap.needs_gc() {
+                        let roots = self.get_roots();
+                        self.heap.collect_garbage(&roots);
+                    }
                     let mut map = HashMap::new();
                     for f in fields.iter().rev() {
                         let v = self.stack.pop().unwrap_or(Value::Null);

@@ -1,5 +1,7 @@
 use crate::ast::Stmt;
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MapKey { String(String), Number(usize), Bool(bool) }
@@ -17,9 +19,17 @@ impl MapKey {
 
 #[derive(Debug, Clone)]
 pub enum Value {
-    Number(f64), String(String), Bool(bool),
-    Function { params: Vec<String>, body: Box<Stmt> },
-    Array(usize), Map(usize), Struct(usize),
+    Number(f64),
+    String(String),
+    Bool(bool),
+    Function {
+        params: Vec<String>,
+        body: Box<Stmt>,
+        captured: Option<Rc<RefCell<Vec<HashMap<String, Value>>>>>,
+    },
+    Array(usize),
+    Map(usize),
+    Struct(usize),
     Null,
 }
 
@@ -43,7 +53,7 @@ impl Value {
 pub enum HeapObject {
     Array(Vec<Value>),
     Map(HashMap<MapKey, Value>),
-    Struct(String, HashMap<String, Value>), // <--- Added String for struct name
+    Struct(String, HashMap<String, Value>),
 }
 
 pub struct Heap {
@@ -54,16 +64,13 @@ pub struct Heap {
 
 impl Heap {
     pub fn new() -> Self { Heap { objects: Vec::new(), marks: Vec::new(), next_gc: 1024 } }
-
     pub fn needs_gc(&self) -> bool { self.objects.len() >= self.next_gc }
-
     pub fn alloc(&mut self, obj: HeapObject) -> usize {
         let idx = self.objects.len();
         self.objects.push(Some(obj));
         self.marks.push(false);
         idx
     }
-
     pub fn get(&self, idx: usize) -> &HeapObject { self.objects[idx].as_ref().unwrap() }
     pub fn get_mut(&mut self, idx: usize) -> &mut HeapObject { self.objects[idx].as_mut().unwrap() }
 
@@ -83,7 +90,13 @@ impl Heap {
 
     fn mark_value(&mut self, val: &Value) {
         match val {
-            Value::Array(idx) | Value::Map(idx) | Value::Struct(idx) => { self.mark_object(*idx); }
+            Value::Array(idx) | Value::Map(idx) | Value::Struct(idx) => {
+                self.mark_object(*idx);
+            }
+            Value::Function { captured: Some(env), .. } => {
+                let vals: Vec<Value> = env.borrow().iter().flat_map(|s| s.values().cloned()).collect();
+                for v in vals { self.mark_value(&v); }
+            }
             _ => {}
         }
     }
@@ -91,7 +104,7 @@ impl Heap {
     fn mark_object(&mut self, idx: usize) {
         if idx >= self.objects.len() || self.marks[idx] || self.objects[idx].is_none() { return; }
         self.marks[idx] = true;
-        let obj = self.objects[idx].as_ref().unwrap().clone(); 
+        let obj = self.objects[idx].as_ref().unwrap().clone();
         match obj {
             HeapObject::Array(arr) => { for v in arr { self.mark_value(&v); } }
             HeapObject::Map(map) => { for v in map.values() { self.mark_value(v); } }
