@@ -1,7 +1,7 @@
 # CONTEXT: The Donky Programming Language Project
 
 ## 1. Project Overview
-Donky is a custom, dynamically typed language built from scratch. The project has 3 implementations:
+Donky is a custom, dynamically typed language built from scratch. Three implementations:
 - **Python Engine** (`donky/`) - reference
 - **Rust Engine** (`donky-native/`) - 3MB native binary with **Tree-Walker** AND **Bytecode VM**
 - **Self-Hosted Kernel Compiler** (`compiler/`) - x86_64 codegen + bare-metal OS
@@ -10,49 +10,40 @@ Donky is a custom, dynamically typed language built from scratch. The project ha
 **Toolchain:** Rust/Cargo, NASM, GCC/MinGW, `rust-lld`, QEMU
 
 ## 2. Rust Engine Architecture
-Uses a **custom Mark-and-Sweep Garbage Collector** instead of `Rc<RefCell>`:
-- **`heap.rs`**: `Heap` with `Vec<Option<HeapObject>>`, `marks: Vec<bool>`, `next_gc: usize`. Methods: `alloc()`, `get()`, `get_mut()`, `needs_gc()`, `collect_garbage(roots)`.
-- **`Value`**: heap indices (`usize`). Variants: `Number`, `String`, `Bool`, `Function`, `Array(usize)`, `Map(usize)`, `Struct(usize)`, `Null`.
-- **`HeapObject`**: `Array(Vec<Value>)`, `Map(HashMap<MapKey, Value>)`, `Struct(String, HashMap<String, Value>)` — the String is the struct name (for method resolution).
+Uses a **custom Mark-and-Sweep GC** instead of `Rc<RefCell>`:
+- **`heap.rs`**: `Heap` with `Vec<Option<HeapObject>>`, `marks: Vec<bool>`, `next_gc: usize`.
+- **`Value`**: flat heap indices (`usize`). Variants: `Number(f64)`, `String`, `Bool`, `Function{params, body}`, `Array(usize)`, `Map(usize)`, `Struct(usize)`, `Null`.
+- **`HeapObject`**: `Array(Vec<Value>)`, `Map(HashMap<MapKey, Value>)`, `Struct(String, HashMap<String, Value>)` — the `String` is the struct name for method resolution.
 
-Two engines:
-- **Tree-Walker** (`interpreter.rs`): `Environment` (scoped HashMap) + `Heap`. ALL built-ins implemented. Handles try/catch/throw, for loops, imports.
-- **Bytecode VM** (`vm.rs`): compiles AST to `OpCode`. Executes with `stack`, `locals`, `frames: Vec<Vec<Value>>` (call frame stack), `functions`, `functions_by_name`, `call_stack`. Uses proper frame stack — critical for method calls.
-
-Both engines produce identical output for the test suite.
+**Both engines now have FULL FEATURE PARITY** except closures (see below).
 
 ## 3. Language Features (Both Engines)
-- `let x = 10;`
-- `fn add(a, b) -> num { return a + b; }`
-- `if`/`else`/`while`/`for x in arr`
-- **Structs + Methods:** `fn Point.move(self, dx, dy) { self.x += dx; }`
+- `let x = 10;`, `fn add(a, b) -> num { ... }`
+- `if` / `else` / `while` / `for x in arr` (with `break` / `continue`)
+- **Structs + Methods:** `fn Point.move(self, dx, dy) { self.x += dx; }` — auto-injects `self` if not present
 - **Pattern Matching:** `match x { 200 { ... } 404 { ... } _ { ... } }`
 - **Compound Assignment:** `+=`, `-=`, `*=`, `/=`
 - **Increment/Decrement:** `++`, `--`
 - **Ternary:** `let x = cond ? a : b;`
-- **Anonymous Functions:** `let f = fn(x) -> num { return x * 2; };`
-- **String Interpolation:** `"Hello ${name}"`
-- **Maps, Arrays**
-- **Try/Catch/Throw** (Tree-Walker only)
-- **Imports** (Tree-Walker only)
-- **Closures** (Tree-Walker only)
+- **Anonymous Functions:** `let f = fn(x) -> num { return x * 2; };` (non-capturing)
+- **String Interpolation:** `"Hello ${name}"` (full expression inside `${...}`)
+- **Try/Catch/Throw** — both engines, full handler stack unwinding
+- **Imports** — both engines
+- **Maps, Arrays, Structs**
 
 ## 4. Built-ins (Both Engines)
-- `str(x)`, `num(s)`, `len(x)`
-- `push(arr, v)`, `pop(arr)`, `split(s, sep)`, `join(arr, sep)`
-- `upper(s)`, `lower(s)`, `trim(s)`, `replace(s, o, n)`, `contains(x, y)`
-- `keys(map)`, `str_eq(a, b)`, `char_code(s)`, `byte_at(s, i)`, `byte_substr(s, a, b)`, `bytes_to_str(arr)`
-- `read_file(p)`, `write_file(p, c)`, `file_exists(p)`, `list_dir(p)`, `mkdir(p)`
-- `random(max)`, `clear_screen()`, `print_str(s)`, `print_char(c)`, `read_line()`, `input(prompt)`
-- `tcp_listen(port)`, `tcp_accept(id)`, `tcp_read(id, max)`, `tcp_write(id, data)`, `tcp_close(id)`, `http_get(url)`
+`str` `num` `type` `len` `push` `pop` `keys` `split` `join` `upper` `lower` `trim` `replace` `contains` `str_eq` `char_code` `byte_at` `byte_substr` `bytes_to_str` `read_file` `write_file` `file_exists` `list_dir` `mkdir` `random` `clear_screen` `print_str` `print_char` `read_line` `input` `tcp_listen` `tcp_accept` `tcp_read` `tcp_write` `tcp_close` `http_get`
 
 ## 5. CRITICAL: Known Bugs & Pitfalls
-1. **The `\r` Bug (OS only):** QEMU sends `\r` and `\n` on Enter. OS `read_line` MUST ignore `13`.
+1. **The `\r` Bug (OS only):** QEMU sends `\r` and `\n`. OS `read_line` MUST ignore `13`.
 2. **Linking (OS only):** Always `rust-lld -flavor gnu -T linker.ld` (MinGW `ld` produces PE).
 3. **Array Indexing (OS only):** Avoid `arr[0]` in `kernel.donk`. Use `mem_read8(addr)`.
-4. **VM Unary:** MUST have `OpCode::Negate` and `OpCode::Not`. Without these, negative args (like `p.move(5, -5)`) silently drop from the stack, breaking method calls.
-5. **VM Frame Stack:** On `Call`/`MethodCall`, push caller's `locals` to `frames` and set `locals = args`. On `Return`, restore from `frames`. Never share `locals` across calls.
-6. **Struct Methods `self`:** Compiler auto-injects `self` as first param if not present. Handles both `fn Point.move(self, dx, dy)` and `fn Point.move(dx, dy)`.
+4. **VM Unary:** MUST have `OpCode::Negate` and `OpCode::Not`. Without them, `-5` silently drops from the stack.
+5. **VM Frame Stack:** On `Call`/`MethodCall`, push caller's `locals` to `frames`, set `locals = args` (in order). On `Return`, restore from `frames`. **Never share locals across calls.**
+6. **VM Arg Order:** Compiler emits args **reversed** (`for arg in args.iter().rev()`). The VM must **NOT** reverse again after popping. Double-reversal breaks commutative-equal calls only (`add(1,2)` works, `move(5,-5)` doesn't). `Array`/`Map` are pushed *forward*, so those **do** need `.reverse()` in the VM.
+7. **Parser: `TokenType::Fn` in `prefix()`** — required for anonymous functions in expression position. Missing arm → "Unexpected token: Fn".
+8. **Parser: compound assignment on `FieldAccess`/`Index`** — the fallback path in `statement()` must check for `+=`/`-=`/etc. after `expression(0)` returns, not just on bare `Ident`.
+9. **Struct `self` injection:** Compiler auto-injects `self` as first param *only if* `params.first() != "self"`. Handles both `fn Point.move(self, ...)` and `fn Point.move(...)`.
 
 ## 6. Build Commands
 ```powershell
@@ -67,7 +58,6 @@ $lld = "C:\Users\user\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustl
 nasm -f elf64 kernel.asm -o kernel.o
 & $lld -flavor gnu -T linker.ld kernel.o -o kernel.elf
 & "C:\Program Files\qemu\qemu-system-x86_64.exe" -kernel kernel.elf -drive file=disk.img,format=raw,if=ide
-
 Kernel Build \& Boot
 
 cd C:\\Users\\user\\Desktop\\Donky-Lang\\compiler
@@ -151,3 +141,42 @@ The kernel is stuck at the disk driver bug. We could either fix it properly or p
 But if you're burnt out on compilers, Option B is a nice change of pace — writing `github_dash.donk` in Donky and watching it fly on both engines would be very satisfying.
 
 
+7. Only Remaining Language Gap: Closures
+fn(x) -> num { return x + outer_var; } will fail at runtime because Value::Function { params, body } doesn't capture the defining environment. Implementing closures requires:
+
+Changing Value::Function to include captured_env: Rc<RefCell<Vec<HashMap<String, Value>>>>
+
+The compiler emitting the captured variables at function-creation time
+
+The Call handler populating self.locals with captured vars + args
+
+Both engines
+
+This is the last big language-level feature before Donky is "feature-complete" by modern standards.
+
+8. Parallel Tracks (For Next Session)
+Path B: Write github_dash.donk and json.donk and run them on the VM (not just Tree-Walker). Should be 2-10x faster. Verify by benchmarking test_gc.donk.
+
+Path C: Kernel has a stalled ATA disk driver. The last known good state is a shell that prints but does not persist files. The exact bug: disk_read/disk_write work but ls after touch returns empty. Likely a sector indexing issue in the OS.
+
+Path D: Fill in lib/list.donk, lib/strings.donk, lib/json.donk (all written in pure Donky) to make the stdlib match a real language.
+
+9. User's Working Style
+Repaste full files. Never snippets.
+
+Incremental. One feature at a time, test, iterate.
+
+Tone: Collaborative, technical, systems-focused.
+
+Screenshot-driven. User shares terminal output; AI diagnoses from exact error messages.
+
+text
+
+What's next?
+
+1. **Closures** — the last language feature
+2. **Benchmarks** — prove the VM is actually faster than the Tree-Walker on real Donky code
+3. **Kernel** — unfreeze the ATA driver
+4. **Real apps** — write something practical (JSON parser, markdown compiler, HTTP server) and dogfood it
+
+My vote: **Closures** then **Benchmarks**. Once closures work, Donky matches Ruby/Python in capability, and the benchmark gap gives you a real performance story for the README. But if you're burnt out on compilers, **Kernel** is a nice reset — it's low-level systems work, totally different energy.
