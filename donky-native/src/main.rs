@@ -48,9 +48,9 @@ fn main() {
 
     if use_vm {
         let compiler = vm::Compiler::new();
-        let code = compiler.compile(ast);
+        let (code, funcs) = compiler.compile(ast);
         let mut machine = vm::VM::new();
-        machine.run(code);
+        machine.run(code, funcs);
     } else {
         let mut interp = interpreter::Interpreter::new(script_args);
         if let Err(e) = interp.interpret(ast) { eprintln!("Runtime Error: {}", e); }

@@ -2,6 +2,8 @@ use crate::ast::{Expr, Stmt};
 use crate::lexer::TokenType;
 use crate::interpreter::Value;
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 #[derive(Debug, Clone)]
 pub enum OpCode {
@@ -13,6 +15,10 @@ pub enum OpCode {
     JumpIfFalse(usize),
     GetLocal(usize),
     SetLocal(usize),
+    Call(usize),
+    Return,
+    Array(usize),
+    Index,
     Halt,
 }
 
@@ -20,17 +26,18 @@ pub struct Compiler {
     code: Vec<OpCode>,
     locals: HashMap<String, usize>,
     next_local: usize,
+    functions: Vec<Vec<OpCode>>,
 }
 
 impl Compiler {
     pub fn new() -> Self {
-        Compiler { code: Vec::new(), locals: HashMap::new(), next_local: 0 }
+        Compiler { code: Vec::new(), locals: HashMap::new(), next_local: 0, functions: Vec::new() }
     }
 
-    pub fn compile(mut self, stmts: Vec<Stmt>) -> Vec<OpCode> {
+    pub fn compile(mut self, stmts: Vec<Stmt>) -> (Vec<OpCode>, Vec<Vec<OpCode>>) {
         for stmt in stmts { self.compile_stmt(stmt); }
         self.code.push(OpCode::Halt);
-        self.code
+        (self.code, self.functions)
     }
 
     fn compile_stmt(&mut self, stmt: Stmt) {
@@ -81,6 +88,26 @@ impl Compiler {
                 let loop_end = self.code.len();
                 self.code[jump_if_false] = OpCode::JumpIfFalse(loop_end);
             }
+            Stmt::Function(name, params, body) => {
+                let mut sub_compiler = Compiler::new();
+                for (i, p) in params.iter().enumerate() { sub_compiler.locals.insert(p.clone(), i); }
+                sub_compiler.next_local = params.len();
+                sub_compiler.compile_stmt(*body);
+                sub_compiler.code.push(OpCode::Return);
+
+                let idx = self.functions.len();
+                self.functions.push(sub_compiler.code);
+
+                let slot = self.next_local;
+                self.locals.insert(name, slot);
+                self.next_local += 1;
+                self.code.push(OpCode::Constant(Value::Number(idx as f64)));
+                self.code.push(OpCode::SetLocal(slot));
+            }
+            Stmt::Return(expr) => {
+                if let Some(e) = expr { self.compile_expr(e); } else { self.code.push(OpCode::Constant(Value::Null)); }
+                self.code.push(OpCode::Return);
+            }
             _ => {}
         }
     }
@@ -95,6 +122,23 @@ impl Compiler {
                     self.code.push(OpCode::GetLocal(slot)); 
                 } else {
                     self.code.push(OpCode::Constant(Value::Null));
+                }
+            }
+            Expr::Array(elements) => {
+                let len = elements.len(); // Save length before consuming
+                for el in elements { self.compile_expr(el); }
+                self.code.push(OpCode::Array(len));
+            }
+            Expr::Index(target, index) => {
+                self.compile_expr(*target);
+                self.compile_expr(*index);
+                self.code.push(OpCode::Index);
+            }
+            Expr::Call(name, args) => {
+                for arg in args.iter().rev() { self.compile_expr(arg.clone()); }
+                if let Some(&slot) = self.locals.get(&name) {
+                    self.code.push(OpCode::GetLocal(slot));
+                    self.code.push(OpCode::Call(args.len()));
                 }
             }
             Expr::Binary(left, op, right) => {
@@ -119,15 +163,25 @@ impl Compiler {
     }
 }
 
-pub struct VM { stack: Vec<Value>, locals: Vec<Value> }
+pub struct VM { 
+    stack: Vec<Value>, 
+    locals: Vec<Value>, 
+    functions: Vec<Vec<OpCode>>, 
+    call_stack: Vec<(usize, usize)> 
+}
 
 impl VM {
-    pub fn new() -> Self { VM { stack: Vec::new(), locals: Vec::new() } }
+    pub fn new() -> Self { 
+        VM { stack: Vec::new(), locals: Vec::new(), functions: Vec::new(), call_stack: Vec::new() } 
+    }
 
-    pub fn run(&mut self, code: Vec<OpCode>) {
+    pub fn run(&mut self, code: Vec<OpCode>, funcs: Vec<Vec<OpCode>>) {
+        self.functions = funcs;
         let mut ip = 0;
-        while ip < code.len() {
-            match &code[ip] {
+        let mut current_code = code.clone();
+
+        while ip < current_code.len() {
+            match &current_code[ip] {
                 OpCode::Constant(v) => self.stack.push(v.clone()),
                 OpCode::Add => {
                     let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null);
@@ -157,6 +211,45 @@ impl VM {
                 OpCode::JumpIfFalse(target) => { 
                     let val = self.stack.pop().unwrap_or(Value::Null); 
                     if !val.is_truthy() { ip = *target; continue; } 
+                }
+                OpCode::Call(arg_count) => {
+                    let func_idx_val = self.stack.pop().unwrap_or(Value::Null);
+                    if let Value::Number(idx) = func_idx_val {
+                        self.call_stack.push((ip, self.locals.len()));
+                        let new_locals: Vec<Value> = (0..*arg_count).map(|_| self.stack.pop().unwrap_or(Value::Null)).collect();
+                        self.locals.extend(new_locals.into_iter()); 
+                        current_code = self.functions[idx as usize].clone();
+                        ip = 0;
+                        continue;
+                    }
+                }
+                OpCode::Return => {
+                    let ret_val = self.stack.pop().unwrap_or(Value::Null);
+                    if let Some((ret_ip, ret_locals_len)) = self.call_stack.pop() {
+                        self.locals.truncate(ret_locals_len);
+                        self.stack.push(ret_val);
+                        current_code = code.clone();
+                        ip = ret_ip;
+                    } else {
+                        break;
+                    }
+                }
+                OpCode::Array(size) => {
+                    let mut elements = Vec::new();
+                    for _ in 0..*size {
+                        elements.push(self.stack.pop().unwrap_or(Value::Null));
+                    }
+                    elements.reverse();
+                    self.stack.push(Value::Array(Rc::new(RefCell::new(elements))));
+                }
+                OpCode::Index => {
+                    let idx = self.stack.pop().unwrap_or(Value::Null);
+                    let target = self.stack.pop().unwrap_or(Value::Null);
+                    if let (Value::Array(arr), Value::Number(n)) = (target, idx) {
+                        let i = n as usize;
+                        let borrowed = arr.borrow();
+                        if i < borrowed.len() { self.stack.push(borrowed[i].clone()); } else { self.stack.push(Value::Null); }
+                    } else { self.stack.push(Value::Null); }
                 }
                 OpCode::Halt => break,
             }

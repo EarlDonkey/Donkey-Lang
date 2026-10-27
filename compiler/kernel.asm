@@ -149,13 +149,112 @@ L4:
     call print_newline
     jmp L7
 L6:
+    mov rax, [rbp - 8]
+    push rax
     lea rax, [rel str_8]
+    mov rsi, rax
+    pop rdi
+    call str_eq
+    push rax
+    mov rax, 1
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    sete al
+    movzx rax, al
+    cmp rax, 0
+    je L8
+    lea rax, [rel str_9]
+    mov rdi, rax
+    call print_str
+    call get_heap
+    mov rdi, rax
+    call print_int
+    call print_newline
+    jmp L9
+L8:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_10]
+    mov rsi, rax
+    pop rdi
+    call str_starts_with
+    push rax
+    mov rax, 1
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    sete al
+    movzx rax, al
+    cmp rax, 0
+    je L10
+    lea rax, [rel str_11]
+    mov rdi, rax
+    call print_str
+    mov rax, [rbp - 8]
+    push rax
+    mov rax, 5
+    mov rsi, rax
+    pop rdi
+    call str_skip
+    mov rdi, rax
+    call print_str
+    call print_newline
+    jmp L11
+L10:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_12]
+    mov rsi, rax
+    pop rdi
+    call str_eq
+    push rax
+    mov rax, 1
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    sete al
+    movzx rax, al
+    cmp rax, 0
+    je L12
+    lea rax, [rel str_13]
+    mov rdi, rax
+    call print_str
+    call reboot
+    jmp L13
+L12:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_14]
+    mov rsi, rax
+    pop rdi
+    call str_eq
+    push rax
+    mov rax, 1
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    sete al
+    movzx rax, al
+    cmp rax, 0
+    je L14
+    lea rax, [rel str_15]
+    mov rdi, rax
+    call print_str
+    call shutdown
+    jmp L15
+L14:
+    lea rax, [rel str_16]
     mov rdi, rax
     call print_str
     mov rax, [rbp - 8]
     mov rdi, rax
     call print_str
     call print_newline
+L15:
+L13:
+L11:
+L9:
 L7:
 L5:
 L3:
@@ -336,6 +435,53 @@ str_eq:
     pop rbx
     ret
 
+str_starts_with:
+    push rbx
+.loop_ss:
+    mov al, [rsi]
+    test al, al
+    jz .yes_ss
+    mov bl, [rdi]
+    cmp al, bl
+    jne .no_ss
+    inc rdi
+    inc rsi
+    jmp .loop_ss
+.yes_ss:
+    mov rax, 1
+    pop rbx
+    ret
+.no_ss:
+    mov rax, 0
+    pop rbx
+    ret
+
+str_skip:
+    mov rax, rdi
+.skip_loop:
+    test rsi, rsi
+    jz .skip_done
+    inc rax
+    dec rsi
+    jmp .skip_loop
+.skip_done:
+    ret
+
+get_heap:
+    mov rax, [rel heap_ptr]
+    ret
+
+reboot:
+    mov al, 0xFE
+    out 0x64, al
+    ret
+
+shutdown:
+    mov dx, 0x604
+    mov ax, 0x2000
+    out dx, ax
+    ret
+
 keyboard_read_ascii:
 .wait_ascii:
     mov dx, 0x64
@@ -352,17 +498,6 @@ keyboard_read_ascii:
     movzx rax, byte [r8 + rax]
     test rax, rax
     jz .wait_ascii
-    ret
-
-keyboard_read:
-    mov dx, 0x64
-.kbd_wait:
-    in al, dx
-    test al, 1
-    jz .kbd_wait
-    mov dx, 0x60
-    in al, dx
-    movzx rax, al
     ret
 
 alloc:
@@ -383,16 +518,23 @@ gdt64_ptr:
     dd gdt64
 
 scancode_map: db 0,0,'1','2','3','4','5','6','7','8','9','0','-','=',8,9,'q','w','e','r','t','y','u','i','o','p','[',']',10,0,'a','s','d','f','g','h','j','k','l',';',39,'`',0,92,'z','x','c','v','b','n','m',',','.','/',0,'*',0,' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-str_7: db `Donky OS - The Native Language`, 0
-str_3: db `Available commands: help, clear, about`, 0
-str_0: db `Donky OS Shell v1.1`, 0
-str_4: db `clear`, 0
+str_5: db `Donky OS Shell v1.4`, 0
 str_1: db `donky> `, 0
-str_5: db `Donky OS Shell v1.1`, 0
+str_9: db `Current Heap Pointer: `, 0
+str_10: db `echo `, 0
+str_14: db `shutdown`, 0
 str_6: db `about`, 0
-str_8: db `Unknown command: `, 0
+str_0: db `Donky OS Shell v1.4`, 0
+str_13: db `Rebooting...`, 0
+str_11: db `Echo: `, 0
 str_2: db `help`, 0
-
+str_4: db `clear`, 0
+str_8: db `mem`, 0
+str_12: db `reboot`, 0
+str_16: db `Unknown command: `, 0
+str_7: db `Donky OS - The Native Language`, 0
+str_15: db `Shutting down...`, 0
+str_3: db `Commands: help, clear, about, mem, echo <text>, reboot, shutdown`, 0
 section .note.Xen note alloc
 align 4
     dd 4

@@ -1,0 +1,9 @@
+fn add(a, b) -> num {
+    let result = a + b;
+    return result;
+}
+
+let x = 10;
+let y = 32;
+let z = add(x, y);
+print(z);

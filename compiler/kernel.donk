@@ -1,4 +1,4 @@
-print("Donky OS Shell v1.1");
+print("Donky OS Shell v1.4");
 print_newline();
 print_newline();
 
@@ -9,15 +9,29 @@ while 1 == 1 {
     read_line(buf);
 
     if str_eq(buf, "help") == 1 {
-        print("Available commands: help, clear, about");
+        print("Commands: help, clear, about, mem, echo <text>, reboot, shutdown");
         print_newline();
     } else if str_eq(buf, "clear") == 1 {
         clear_screen();
-        print("Donky OS Shell v1.1");
+        print("Donky OS Shell v1.4");
         print_newline();
     } else if str_eq(buf, "about") == 1 {
         print("Donky OS - The Native Language");
         print_newline();
+    } else if str_eq(buf, "mem") == 1 {
+        print("Current Heap Pointer: ");
+        print_int(get_heap());
+        print_newline();
+    } else if str_starts_with(buf, "echo ") == 1 {
+        print("Echo: ");
+        print_str(str_skip(buf, 5));
+        print_newline();
+    } else if str_eq(buf, "reboot") == 1 {
+        print("Rebooting...");
+        reboot();
+    } else if str_eq(buf, "shutdown") == 1 {
+        print("Shutting down...");
+        shutdown();
     } else {
         print("Unknown command: ");
         print_str(buf);

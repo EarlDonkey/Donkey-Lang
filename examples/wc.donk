@@ -1,0 +1,17 @@
+if len(args) < 1 {
+    print("Usage: donky-native wc.donk <file>");
+} else {
+    let filename = args[0];
+    if !file_exists(filename) {
+        print("File not found: " + filename);
+    } else {
+        let content = read_file(filename);
+        let lines = split(content, "\n");
+        let words = split(content, " ");
+        
+        print("File: " + filename);
+        print("Bytes: " + str(len(content)));
+        print("Lines: " + str(len(lines)));
+        print("Words: " + str(len(words)));
+    }
+}
