@@ -17,21 +17,14 @@ impl MapKey {
 
 #[derive(Debug, Clone)]
 pub enum Value {
-    Number(f64), 
-    String(String), 
-    Bool(bool),
+    Number(f64), String(String), Bool(bool),
     Function { params: Vec<String>, body: Box<Stmt> },
-    Array(usize),
-    Map(usize),
-    Struct(usize),
+    Array(usize), Map(usize), Struct(usize),
     Null,
 }
 
 impl Value {
-    pub fn is_truthy(&self) -> bool {
-        matches!(self, Value::Bool(true))
-    }
-
+    pub fn is_truthy(&self) -> bool { matches!(self, Value::Bool(true)) }
     pub fn to_string(&self) -> String {
         match self {
             Value::Number(n) => if n.fract() == 0.0 { format!("{:.0}", n) } else { n.to_string() },
@@ -50,7 +43,7 @@ impl Value {
 pub enum HeapObject {
     Array(Vec<Value>),
     Map(HashMap<MapKey, Value>),
-    Struct(HashMap<String, Value>),
+    Struct(String, HashMap<String, Value>), // <--- Added String for struct name
 }
 
 pub struct Heap {
@@ -60,17 +53,9 @@ pub struct Heap {
 }
 
 impl Heap {
-    pub fn new() -> Self {
-        Heap {
-            objects: Vec::new(),
-            marks: Vec::new(),
-            next_gc: 1024, // Trigger GC after 1024 allocations
-        }
-    }
+    pub fn new() -> Self { Heap { objects: Vec::new(), marks: Vec::new(), next_gc: 1024 } }
 
-    pub fn needs_gc(&self) -> bool {
-        self.objects.len() >= self.next_gc
-    }
+    pub fn needs_gc(&self) -> bool { self.objects.len() >= self.next_gc }
 
     pub fn alloc(&mut self, obj: HeapObject) -> usize {
         let idx = self.objects.len();
@@ -79,21 +64,12 @@ impl Heap {
         idx
     }
 
-    pub fn get(&self, idx: usize) -> &HeapObject {
-        self.objects[idx].as_ref().unwrap()
-    }
-
-    pub fn get_mut(&mut self, idx: usize) -> &mut HeapObject {
-        self.objects[idx].as_mut().unwrap()
-    }
+    pub fn get(&self, idx: usize) -> &HeapObject { self.objects[idx].as_ref().unwrap() }
+    pub fn get_mut(&mut self, idx: usize) -> &mut HeapObject { self.objects[idx].as_mut().unwrap() }
 
     pub fn collect_garbage(&mut self, roots: &[Value]) {
         for mark in self.marks.iter_mut() { *mark = false; }
-
-        for root in roots {
-            self.mark_value(root);
-        }
-
+        for root in roots { self.mark_value(root); }
         let mut freed = 0;
         for i in 0..self.objects.len() {
             if !self.marks[i] && self.objects[i].is_some() {
@@ -101,36 +77,25 @@ impl Heap {
                 freed += 1;
             }
         }
-
         self.next_gc = std::cmp::max(1024, self.objects.len() * 2);
         println!("[GC] Swept {} objects. Heap size: {}", freed, self.objects.len());
     }
 
     fn mark_value(&mut self, val: &Value) {
         match val {
-            Value::Array(idx) | Value::Map(idx) | Value::Struct(idx) => {
-                self.mark_object(*idx);
-            }
+            Value::Array(idx) | Value::Map(idx) | Value::Struct(idx) => { self.mark_object(*idx); }
             _ => {}
         }
     }
 
     fn mark_object(&mut self, idx: usize) {
         if idx >= self.objects.len() || self.marks[idx] || self.objects[idx].is_none() { return; }
-        
         self.marks[idx] = true;
-
         let obj = self.objects[idx].as_ref().unwrap().clone(); 
         match obj {
-            HeapObject::Array(arr) => {
-                for v in arr { self.mark_value(&v); }
-            }
-            HeapObject::Map(map) => {
-                for v in map.values() { self.mark_value(v); }
-            }
-            HeapObject::Struct(fields) => {
-                for v in fields.values() { self.mark_value(v); }
-            }
+            HeapObject::Array(arr) => { for v in arr { self.mark_value(&v); } }
+            HeapObject::Map(map) => { for v in map.values() { self.mark_value(v); } }
+            HeapObject::Struct(_, fields) => { for v in fields.values() { self.mark_value(v); } }
         }
     }
 }

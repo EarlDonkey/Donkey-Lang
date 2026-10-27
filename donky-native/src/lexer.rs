@@ -1,7 +1,7 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
     Number, String, StringInterp, Ident,
-    Let, Fn, If, Else, While, For, In, Return, Print, True, False, Div, Break, Continue, Try, Catch, Throw, Import, Struct, Asm,
+    Let, Fn, If, Else, While, For, In, Return, Print, True, False, Div, Break, Continue, Try, Catch, Throw, Import, Struct, Asm, Match,
     Plus, Minus, Star, Slash, Percent, Bang, And, Or, Eq, EqEq, NotEq, Lt, LtEq, Gt, GtEq,
     PlusEq, MinusEq, StarEq, SlashEq, PlusPlus, MinusMinus, Question,
     LParen, RParen, LBrace, RBrace, LBracket, RBracket, Semi, Comma, Colon, Dot, Eof,
@@ -26,12 +26,7 @@ pub struct Lexer {
 impl Lexer {
     pub fn new(source: &str) -> Self {
         let src = source.trim_start_matches('\u{feff}');
-        Lexer {
-            source: src.chars().collect(),
-            pos: 0,
-            line: 1,
-            col: 1,
-        }
+        Lexer { source: src.chars().collect(), pos: 0, line: 1, col: 1 }
     }
 
     fn at_end(&self) -> bool { self.pos >= self.source.len() }
@@ -111,13 +106,7 @@ impl Lexer {
                     self.advance();
                     
                     let ttype = if has_interp { TokenType::StringInterp } else { TokenType::String };
-                    tokens.push(Token { 
-                        ttype, 
-                        lexeme: format!("\"{}\"", val), 
-                        literal: Some(val), 
-                        line: start_line, 
-                        col: start_col 
-                    });
+                    tokens.push(Token { ttype, lexeme: format!("\"{}\"", val), literal: Some(val), line: start_line, col: start_col });
                     continue;
                 },
                 _ => {
@@ -126,13 +115,7 @@ impl Lexer {
                         while self.peek(0).is_ascii_digit() || self.peek(0) == '.' {
                             num_str.push(self.advance());
                         }
-                        tokens.push(Token { 
-                            ttype: TokenType::Number, 
-                            lexeme: num_str.clone(), 
-                            literal: Some(num_str), 
-                            line: start_line, 
-                            col: start_col 
-                        });
+                        tokens.push(Token { ttype: TokenType::Number, lexeme: num_str.clone(), literal: Some(num_str), line: start_line, col: start_col });
                         continue;
                     } else if c.is_alphabetic() || c == '_' {
                         let mut ident = c.to_string();
@@ -146,40 +129,20 @@ impl Lexer {
                             "true" => TokenType::True, "false" => TokenType::False, "div" => TokenType::Div,
                             "break" => TokenType::Break, "continue" => TokenType::Continue, "try" => TokenType::Try,
                             "catch" => TokenType::Catch, "throw" => TokenType::Throw, "import" => TokenType::Import,
-                            "struct" => TokenType::Struct, "asm" => TokenType::Asm,
+                            "struct" => TokenType::Struct, "asm" => TokenType::Asm, "match" => TokenType::Match,
                             _ => TokenType::Ident,
                         };
-                        tokens.push(Token { 
-                            ttype, 
-                            lexeme: ident, 
-                            literal: None, 
-                            line: start_line, 
-                            col: start_col 
-                        });
+                        tokens.push(Token { ttype, lexeme: ident, literal: None, line: start_line, col: start_col });
                         continue;
                     } else {
                         return Err(format!("Unexpected character: {}", c));
                     }
                 }
             };
-            
-            tokens.push(Token { 
-                ttype: token_type, 
-                lexeme: c.to_string(), 
-                literal: None, 
-                line: start_line, 
-                col: start_col 
-            });
+            tokens.push(Token { ttype: token_type, lexeme: c.to_string(), literal: None, line: start_line, col: start_col });
         }
 
-        tokens.push(Token { 
-            ttype: TokenType::Eof, 
-            lexeme: String::new(), 
-            literal: None, 
-            line: self.line, 
-            col: self.col 
-        });
-        
+        tokens.push(Token { ttype: TokenType::Eof, lexeme: String::new(), literal: None, line: self.line, col: self.col });
         Ok(tokens)
     }
 }

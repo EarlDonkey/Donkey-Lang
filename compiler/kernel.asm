@@ -1027,28 +1027,28 @@ gdt64_ptr:
 scancode_map: db 0,0,'1','2','3','4','5','6','7','8','9','0','-','=',8,9,'q','w','e','r','t','y','u','i','o','p','[',']',10,0,'a','s','d','f','g','h','j','k','l',';',39,'`',0,92,'z','x','c','v','b','n','m',',','.','/',0,'*',0,' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 scancode_map_shift: db 0,0,'!','@','#','$','%','^','&','*','(',')','_','+',8,9,'Q','W','E','R','T','Y','U','I','O','P','{','}',10,0,'A','S','D','F','G','H','J','K','L',':','"','~',0,'|','Z','X','C','V','B','N','M','<','>','?',0,'*',0,' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 str_4: db `clear`, 0
-str_5: db `Donky OS Shell v2.4 (DonkyFS)`, 0
-str_17: db `Created file: `, 0
-str_2: db `help`, 0
-str_22: db `command not found: `, 0
-str_1: db `root@donky:~# `, 0
-str_9: db `Shutting down...`, 0
-str_15: db `-----------------`, 0
-str_19: db `Clearing Directory...`, 0
-str_7: db `Rebooting...`, 0
-str_11: db `Formatting DonkyFS...`, 0
-str_10: db `mkfs`, 0
+str_0: db `Donky OS Shell v2.4 (DonkyFS)`, 0
 str_3: db `Commands: help, clear, reboot, shutdown, ls, touch <name>, rm, mkfs`, 0
+str_10: db `mkfs`, 0
+str_11: db `Formatting DonkyFS...`, 0
+str_8: db `shutdown`, 0
+str_16: db `touch `, 0
+str_17: db `Created file: `, 0
+str_20: db `Directory cleared.`, 0
+str_19: db `Clearing Directory...`, 0
 str_14: db `--- Directory ---`, 0
 str_18: db `rm`, 0
-str_0: db `Donky OS Shell v2.4 (DonkyFS)`, 0
-str_6: db `reboot`, 0
-str_12: db `Formatted Sector 1.`, 0
-str_8: db `shutdown`, 0
+str_9: db `Shutting down...`, 0
+str_15: db `-----------------`, 0
 str_13: db `ls`, 0
-str_16: db `touch `, 0
-str_20: db `Directory cleared.`, 0
+str_12: db `Formatted Sector 1.`, 0
+str_2: db `help`, 0
+str_5: db `Donky OS Shell v2.4 (DonkyFS)`, 0
+str_6: db `reboot`, 0
+str_7: db `Rebooting...`, 0
+str_1: db `root@donky:~# `, 0
 str_21: db ``, 0
+str_22: db `command not found: `, 0
 section .note.Xen note alloc
 align 4
     dd 4

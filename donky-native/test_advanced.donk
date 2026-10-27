@@ -1,0 +1,24 @@
+print("=== Testing Methods and Match ===");
+
+struct Point { x: num, y: num }
+
+fn Point.move(self, dx, dy) {
+    self.x += dx;
+    self.y += dy;
+}
+
+let p = Point { x: 10, y: 20 };
+p.move(5, -5);
+print("Point after move: x=" + str(p.x) + ", y=" + str(p.y));
+
+let status = 404;
+match status {
+    200 { print("OK"); }
+    404 { print("Not Found (Matched!)"); }
+    500 { print("Server Error"); }
+    _ { print("Unknown"); }
+}
+
+let str_test = "Hello Donky";
+print("Upper: " + upper(str_test));
+print("Split: " + str(split(str_test, " ")));

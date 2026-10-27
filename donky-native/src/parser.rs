@@ -7,10 +7,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, current: 0 }
-    }
-
+    pub fn new(tokens: Vec<Token>) -> Self { Parser { tokens, current: 0 } }
     fn peek(&self) -> &Token { &self.tokens[self.current] }
     fn peek_n(&self, n: usize) -> &Token {
         if self.current + n >= self.tokens.len() { &self.tokens[self.tokens.len() - 1] } 
@@ -55,11 +52,52 @@ impl Parser {
         Ok(statements)
     }
 
+    fn build_compound(&mut self, target: Expr, bin_op: TokenType, value: Expr) -> Result<Stmt, String> {
+        match target {
+            Expr::Ident(name) => {
+                let lhs = Expr::Ident(name.clone());
+                Ok(Stmt::Assign(name, Expr::Binary(Box::new(lhs), bin_op, Box::new(value))))
+            }
+            Expr::Index(obj, idx) => {
+                if let Expr::Ident(name) = *obj {
+                    let lhs = Expr::Index(Box::new(Expr::Ident(name.clone())), idx.clone());
+                    Ok(Stmt::IndexSet(name, *idx, Expr::Binary(Box::new(lhs), bin_op, Box::new(value))))
+                } else {
+                    Err("Compound assignment only supported on simple identifiers".to_string())
+                }
+            }
+            Expr::FieldAccess(obj, field) => {
+                let lhs = Expr::FieldAccess(obj.clone(), field.clone());
+                Ok(Stmt::FieldSet(*obj, field, Expr::Binary(Box::new(lhs), bin_op, Box::new(value))))
+            }
+            _ => Err("Invalid compound assignment target".to_string()),
+        }
+    }
+
     fn statement(&mut self) -> Result<Stmt, String> {
         if self.match_token(&[TokenType::Import]) {
             let path = self.consume(TokenType::String, "Expected path")?.literal.clone().unwrap();
             self.consume(TokenType::Semi, "Expected ';'")?;
             return Ok(Stmt::Import(path));
+        }
+
+        if self.match_token(&[TokenType::Match]) {
+            let target = self.expression(0)?;
+            self.consume(TokenType::LBrace, "Expected '{' after match")?;
+            let mut cases = Vec::new();
+            let mut else_block = None;
+            
+            while !self.check(TokenType::RBrace) && !self.is_at_end() {
+                if self.match_token(&[TokenType::Ident]) && self.previous().lexeme == "_" {
+                    else_block = Some(Box::new(self.statement()?));
+                } else {
+                    let case_val = self.expression(0)?;
+                    let block = Box::new(self.statement()?);
+                    cases.push((case_val, block));
+                }
+            }
+            self.consume(TokenType::RBrace, "Expected '}'")?;
+            return Ok(Stmt::Match(target, cases, else_block));
         }
 
         if self.match_token(&[TokenType::Try]) {
@@ -145,7 +183,11 @@ impl Parser {
         }
 
         if self.match_token(&[TokenType::Fn]) {
-            let name = self.consume(TokenType::Ident, "Expected function name")?.lexeme.clone();
+            let mut name = self.consume(TokenType::Ident, "Expected function name")?.lexeme.clone();
+            if self.match_token(&[TokenType::Dot]) {
+                let method = self.consume(TokenType::Ident, "Expected method name")?.lexeme.clone();
+                name = format!("{}.{}", name, method);
+            }
             self.consume(TokenType::LParen, "Expected '('")?;
             let mut params = Vec::new();
             if !self.check(TokenType::RParen) {
@@ -171,21 +213,20 @@ impl Parser {
         if self.match_token(&[TokenType::Break]) { self.consume(TokenType::Semi, "Expected ';'")?; return Ok(Stmt::Break); }
         if self.match_token(&[TokenType::Continue]) { self.consume(TokenType::Semi, "Expected ';'")?; return Ok(Stmt::Continue); }
 
-        // Desugar ++ and --
+        // Simple ident prefix desugaring (x++, x--)
         if self.check(TokenType::Ident) && self.peek_n(1).ttype == TokenType::PlusPlus {
             let name = self.advance().lexeme.clone();
-            self.advance(); // ++
+            self.advance();
             self.consume(TokenType::Semi, "Expected ';'")?;
             return Ok(Stmt::Assign(name.clone(), Expr::Binary(Box::new(Expr::Ident(name)), TokenType::Plus, Box::new(Expr::Number(1.0)))));
         }
         if self.check(TokenType::Ident) && self.peek_n(1).ttype == TokenType::MinusMinus {
             let name = self.advance().lexeme.clone();
-            self.advance(); // --
+            self.advance();
             self.consume(TokenType::Semi, "Expected ';'")?;
             return Ok(Stmt::Assign(name.clone(), Expr::Binary(Box::new(Expr::Ident(name)), TokenType::Minus, Box::new(Expr::Number(1.0)))));
         }
-
-        // Desugar +=, -=, *=, /=
+        // Simple ident prefix desugaring (x += 5)
         if self.check(TokenType::Ident) {
             let next = self.peek_n(1).ttype.clone();
             if next == TokenType::PlusEq || next == TokenType::MinusEq || next == TokenType::StarEq || next == TokenType::SlashEq {
@@ -203,17 +244,43 @@ impl Parser {
                 return Ok(Stmt::Assign(name.clone(), Expr::Binary(Box::new(Expr::Ident(name)), bin_op, Box::new(value))));
             }
         }
-
+        // Simple ident plain assignment (x = 5)
         if self.check(TokenType::Ident) && self.peek_n(1).ttype == TokenType::Eq {
             let name = self.advance().lexeme.clone();
-            self.advance(); // =
+            self.advance();
             let value = self.expression(0)?;
             self.consume(TokenType::Semi, "Expected ';'")?;
             return Ok(Stmt::Assign(name, value));
         }
 
+        // Fallback: parse expression, then check for assignment operators (covers self.x += and arr[i] += )
         let expr = self.expression(0)?;
         
+        // NEW: Handle +=, -=, *=, /= on FieldAccess and Index expressions
+        if self.check(TokenType::PlusEq) || self.check(TokenType::MinusEq) || self.check(TokenType::StarEq) || self.check(TokenType::SlashEq) {
+            let op_token = self.advance().ttype.clone();
+            let value = self.expression(0)?;
+            let bin_op = match op_token {
+                TokenType::PlusEq => TokenType::Plus,
+                TokenType::MinusEq => TokenType::Minus,
+                TokenType::StarEq => TokenType::Star,
+                TokenType::SlashEq => TokenType::Slash,
+                _ => unreachable!(),
+            };
+            self.consume(TokenType::Semi, "Expected ';'")?;
+            return self.build_compound(expr, bin_op, value);
+        }
+        
+        // NEW: Handle ++, -- on FieldAccess and Index expressions
+        if self.check(TokenType::PlusPlus) || self.check(TokenType::MinusMinus) {
+            let is_plus = self.check(TokenType::PlusPlus);
+            self.advance();
+            let bin_op = if is_plus { TokenType::Plus } else { TokenType::Minus };
+            self.consume(TokenType::Semi, "Expected ';'")?;
+            return self.build_compound(expr, bin_op, Expr::Number(1.0));
+        }
+        
+        // Handle plain = assignment for FieldAccess and Index
         if self.match_token(&[TokenType::Eq]) {
             let value = self.expression(0)?;
             self.consume(TokenType::Semi, "Expected ';'")?;
@@ -242,7 +309,19 @@ impl Parser {
 
         while self.match_token(&[TokenType::Dot]) {
             let field = self.consume(TokenType::Ident, "Expected field name")?.lexeme.clone();
-            left = Expr::FieldAccess(Box::new(left), field);
+            if self.match_token(&[TokenType::LParen]) {
+                let mut args = Vec::new();
+                if !self.check(TokenType::RParen) {
+                    loop {
+                        args.push(self.expression(0)?);
+                        if !self.match_token(&[TokenType::Comma]) { break; }
+                    }
+                }
+                self.consume(TokenType::RParen, "Expected ')'")?;
+                left = Expr::MethodCall(Box::new(left), field, args);
+            } else {
+                left = Expr::FieldAccess(Box::new(left), field);
+            }
         }
 
         while let Some((l_bp, r_bp)) = self.infix_binding_power(&self.peek().ttype) {
@@ -252,7 +331,6 @@ impl Parser {
             left = Expr::Binary(Box::new(left), op_token, Box::new(right));
         }
 
-        // Ternary Operator
         if min_bp <= 2 && self.match_token(&[TokenType::Question]) {
             let then_branch = self.expression(0)?;
             self.consume(TokenType::Colon, "Expected ':' in ternary")?;
@@ -265,7 +343,6 @@ impl Parser {
 
     fn prefix(&mut self) -> Result<Expr, String> {
         let token = self.advance().clone();
-
         match token.ttype {
             TokenType::Number => Ok(Expr::Number(token.literal.unwrap().parse().unwrap())),
             TokenType::String => Ok(Expr::String(token.literal.unwrap())),
@@ -274,7 +351,6 @@ impl Parser {
                 let mut parts = Vec::new();
                 let mut current_text = String::new();
                 let mut chars = raw.chars().peekable();
-                
                 while let Some(c) = chars.next() {
                     if c == '$' && chars.peek() == Some(&'{') {
                         chars.next();
@@ -287,15 +363,12 @@ impl Parser {
                             if depth == 0 { break; }
                             expr_text.push(chars.next().unwrap());
                         }
-                        chars.next(); // consume '}'
-                        
+                        chars.next();
                         let mut sub_lex = Lexer::new(&expr_text);
                         let sub_tokens = sub_lex.tokenize()?;
                         let mut sub_parser = Parser::new(sub_tokens);
                         parts.push(sub_parser.expression(0)?);
-                    } else {
-                        current_text.push(c);
-                    }
+                    } else { current_text.push(c); }
                 }
                 if !current_text.is_empty() { parts.push(Expr::String(current_text)); }
                 Ok(Expr::InterpolatedString(parts))
@@ -315,7 +388,7 @@ impl Parser {
                     self.consume(TokenType::RParen, "Expected ')'")?;
                     Ok(Expr::Call(name, args))
                 } else if self.check(TokenType::LBrace) && self.peek_n(1).ttype == TokenType::Ident && self.peek_n(2).ttype == TokenType::Colon {
-                    self.advance(); // {
+                    self.advance();
                     let mut fields = Vec::new();
                     while !self.check(TokenType::RBrace) && !self.is_at_end() {
                         let f_name = self.consume(TokenType::Ident, "Expected field name")?.lexeme.clone();

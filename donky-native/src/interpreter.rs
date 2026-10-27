@@ -86,6 +86,16 @@ impl Interpreter {
                 for s in ast { self.execute(s)?; }
                 Ok(ControlFlow::Normal)
             }
+            Stmt::Match(target_expr, cases, else_block) => {
+                let target = self.evaluate(target_expr)?;
+                for (case_expr, block) in cases {
+                    let case_val = self.evaluate(case_expr)?;
+                    if target.to_string() == case_val.to_string() {
+                        return self.execute(*block);
+                    }
+                }
+                if let Some(eb) = else_block { self.execute(*eb) } else { Ok(ControlFlow::Normal) }
+            }
             Stmt::Try(try_block, err_name, catch_block) => {
                 match self.execute(*try_block) {
                     Ok(ControlFlow::Throw(val)) => {
@@ -140,7 +150,7 @@ impl Interpreter {
                     }
                     Value::Struct(idx) => { 
                         if let Value::String(k) = index { 
-                            if let HeapObject::Struct(fields) = self.heap.get_mut(idx) {
+                            if let HeapObject::Struct(_, fields) = self.heap.get_mut(idx) {
                                 fields.insert(k, value); 
                             }
                         } else { return Err("Struct index must be a string".to_string()); } 
@@ -154,12 +164,12 @@ impl Interpreter {
                 let value = self.evaluate(val_expr)?;
                 match obj {
                     Value::Struct(idx) => {
-                        if let HeapObject::Struct(fields) = self.heap.get_mut(idx) {
+                        if let HeapObject::Struct(_, fields) = self.heap.get_mut(idx) {
                             fields.insert(field, value);
                         }
                         Ok(ControlFlow::Normal)
                     }
-                    _ => Err("Can only set fields on structs".to_string()),
+                    _ => Err(format!("Can only set fields on structs (got {})", obj.to_string())),
                 }
             }
             Stmt::Print(expr) => { println!("{}", self.evaluate(expr)?.to_string()); Ok(ControlFlow::Normal) }
@@ -214,7 +224,17 @@ impl Interpreter {
                     _ => Err("Can only iterate over arrays right now".to_string()),
                 }
             }
-            Stmt::Function(name, params, body) => { let f = Value::Function { params, body }; self.env.define(name, f); Ok(ControlFlow::Normal) }
+            Stmt::Function(name, params, body) => { 
+                let mut final_params = params;
+                if name.contains('.') { 
+                    if final_params.first().map_or(true, |p| p != "self") {
+                        final_params.insert(0, "self".to_string()); 
+                    }
+                }
+                let f = Value::Function { params: final_params, body }; 
+                self.env.define(name, f); 
+                Ok(ControlFlow::Normal) 
+            }
             Stmt::Return(expr) => { let v = if let Some(e) = expr { self.evaluate(e)? } else { Value::Null }; Ok(ControlFlow::Return(v)) }
             Stmt::Break => Ok(ControlFlow::Break),
             Stmt::Continue => Ok(ControlFlow::Continue),
@@ -237,13 +257,13 @@ impl Interpreter {
                 if !self.env.structs.contains_key(&name) { return Err(format!("Undefined struct '{}'", name)); }
                 let mut map = HashMap::new();
                 for (f, e) in fields { map.insert(f, self.evaluate(e)?); }
-                let idx = self.heap.alloc(HeapObject::Struct(map));
+                let idx = self.heap.alloc(HeapObject::Struct(name, map));
                 Ok(Value::Struct(idx))
             }
             Expr::FieldAccess(obj, field) => {
                 match self.evaluate(*obj)? {
                     Value::Struct(idx) => {
-                        if let HeapObject::Struct(fields) = self.heap.get(idx) {
+                        if let HeapObject::Struct(_, fields) = self.heap.get(idx) {
                             match fields.get(&field) {
                                 Some(v) => Ok(v.clone()),
                                 None => Ok(Value::Null),
@@ -292,7 +312,7 @@ impl Interpreter {
                     }
                     Value::Struct(idx) => {
                         if let Value::String(k) = index_val {
-                            if let HeapObject::Struct(fields) = self.heap.get(idx) {
+                            if let HeapObject::Struct(_, fields) = self.heap.get(idx) {
                                 match fields.get(&k) {
                                     Some(v) => Ok(v.clone()),
                                     None => Err(format!("Key '{}' not found in struct", k)),
@@ -311,6 +331,24 @@ impl Interpreter {
                     }
                     _ => Err(format!("Cannot index type '{}'", target_val.to_string())),
                 }
+            }
+            Expr::MethodCall(target, method, args) => {
+                let obj = self.evaluate(*target)?;
+                if let Value::Struct(idx) = obj {
+                    let struct_name = if let HeapObject::Struct(name, _) = self.heap.get(idx) { name.clone() } else { "".to_string() };
+                    let full_name = format!("{}.{}", struct_name, method);
+                    let callee = self.env.get(&full_name)?;
+                    if let Value::Function { params, body } = callee {
+                        let mut arg_vals = vec![Value::Struct(idx)]; 
+                        for a in args { arg_vals.push(self.evaluate(a)?); }
+                        if arg_vals.len() != params.len() { return Err(format!("Method {} expects {} args, got {}", full_name, params.len(), arg_vals.len())); }
+                        self.env.push_scope();
+                        for (p, v) in params.iter().zip(arg_vals) { self.env.define(p.clone(), v); }
+                        let result = self.execute(*body)?;
+                        self.env.pop_scope();
+                        if let ControlFlow::Return(val) = result { Ok(val) } else { Ok(Value::Null) }
+                    } else { Err(format!("Method '{}' not found", full_name)) }
+                } else { Err("Can only call methods on structs".to_string()) }
             }
             Expr::Call(name, args) => {
                 if name == "tcp_listen" {
