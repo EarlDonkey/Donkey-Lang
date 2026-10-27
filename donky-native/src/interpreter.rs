@@ -280,16 +280,16 @@ impl Interpreter {
                 match self.evaluate(*obj)? {
                     Value::Struct(_, fields) => match fields.borrow().get(&field) {
                         Some(v) => Ok(v.clone()),
-                        None => Err(format!("Field '{}' not found", field)),
+                        None => Ok(Value::Null), 
                     },
                     Value::Map(map) => {
                         let key = MapKey::String(field.clone());
                         match map.borrow().get(&key) {
                             Some(v) => Ok(v.clone()),
-                            None => Err(format!("Key '{}' not found in map", field)),
+                            None => Ok(Value::Null), 
                         }
                     }
-                    _ => Err("Can only access fields on structs or maps".to_string()),
+                    _ => Ok(Value::Null),
                 }
             }
             Expr::Array(elements) => {
@@ -441,7 +441,7 @@ impl Interpreter {
                 if name == "str_eq" {
                     let a = self.evaluate(args[0].clone())?;
                     let b = self.evaluate(args[1].clone())?;
-                    return Ok(Value::Bool(a.to_string() == b.to_string()));
+                    return Ok(Value::Number(if a.to_string() == b.to_string() { 1.0 } else { 0.0 }));
                 }
                 if name == "print_char" {
                     let c = self.evaluate(args[0].clone())?;

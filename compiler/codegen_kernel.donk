@@ -148,10 +148,6 @@ fn gen_stmt(state, node) -> void {
             gen_expr(state, val);
             emit(state, "    mov rdi, rax");
             emit(state, "    call print_str");
-        } else if type(val) == "map" && contains(val, "type") && val["type"] == "Call" && get_name(val) == "read_line" {
-            gen_expr(state, val);
-            emit(state, "    mov rdi, rax");
-            emit(state, "    call print_str");
         } else {
             gen_expr(state, val);
             emit(state, "    mov rdi, rax");
@@ -233,9 +229,18 @@ fn compile_to_kernel(ast) -> str {
     emit(state, "    mov eax, pd");
     emit(state, "    or eax, 3");
     emit(state, "    mov [edi], eax");
+    
+    // MAP 8MB OF MEMORY (4x 2MB pages)
     emit(state, "    mov edi, pd");
     emit(state, "    mov eax, 0x83");
     emit(state, "    mov [edi], eax");
+    emit(state, "    mov eax, 0x200083");
+    emit(state, "    mov [edi + 8], eax");
+    emit(state, "    mov eax, 0x400083");
+    emit(state, "    mov [edi + 16], eax");
+    emit(state, "    mov eax, 0x600083");
+    emit(state, "    mov [edi + 24], eax");
+    
     emit(state, "    mov eax, cr4");
     emit(state, "    or eax, 0x20");
     emit(state, "    mov cr4, eax");
@@ -379,6 +384,7 @@ fn compile_to_kernel(ast) -> str {
     emit(state, "");
     
     emit(state, "str_eq:");
+    emit(state, "    push rbx");
     emit(state, ".str_eq_loop:");
     emit(state, "    mov al, [rdi]");
     emit(state, "    mov bl, [rsi]");
@@ -391,9 +397,11 @@ fn compile_to_kernel(ast) -> str {
     emit(state, "    jmp .str_eq_loop");
     emit(state, ".str_eq_yes:");
     emit(state, "    mov rax, 1");
+    emit(state, "    pop rbx");
     emit(state, "    ret");
     emit(state, ".str_eq_no:");
     emit(state, "    mov rax, 0");
+    emit(state, "    pop rbx");
     emit(state, "    ret");
     emit(state, "");
     
@@ -406,8 +414,8 @@ fn compile_to_kernel(ast) -> str {
     emit(state, "    test al, 0x80");
     emit(state, "    jnz .wait_ascii");
     emit(state, "    movzx rax, al");
-    emit(state, "    lea rbx, [rel scancode_map]");
-    emit(state, "    movzx rax, byte [rbx + rax]");
+    emit(state, "    lea r8, [rel scancode_map]");
+    emit(state, "    movzx rax, byte [r8 + rax]");
     emit(state, "    test rax, rax");
     emit(state, "    jz .wait_ascii");
     emit(state, "    ret");

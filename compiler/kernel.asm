@@ -23,6 +23,12 @@ _start:
     mov edi, pd
     mov eax, 0x83
     mov [edi], eax
+    mov eax, 0x200083
+    mov [edi + 8], eax
+    mov eax, 0x400083
+    mov [edi + 16], eax
+    mov eax, 0x600083
+    mov [edi + 24], eax
     mov eax, cr4
     or eax, 0x20
     mov cr4, eax
@@ -57,15 +63,13 @@ long_mode:
     mov rdi, rax
     call print_str
     call print_newline
-    lea rax, [rel str_1]
+    call print_newline
+    mov rax, 128
     mov rdi, rax
-    call print_str
-    call print_newline
-    call print_newline
-    mov rax, 1
+    call alloc
     mov [rbp - 8], rax
 L0:
-    mov rax, [rbp - 8]
+    mov rax, 1
     push rax
     mov rax, 1
     mov rbx, rax
@@ -75,13 +79,18 @@ L0:
     movzx rax, al
     cmp rax, 0
     je L1
-    lea rax, [rel str_2]
+    lea rax, [rel str_1]
     mov rdi, rax
     call print_str
-    mov rax, 1
-    mov [rbp - 16], rax
-L2:
-    mov rax, [rbp - 16]
+    mov rax, [rbp - 8]
+    mov rdi, rax
+    call read_line
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_2]
+    mov rsi, rax
+    pop rdi
+    call str_eq
     push rax
     mov rax, 1
     mov rbx, rax
@@ -90,12 +99,21 @@ L2:
     sete al
     movzx rax, al
     cmp rax, 0
-    je L3
-    call keyboard_read_ascii
-    mov [rbp - 24], rax
-    mov rax, [rbp - 24]
+    je L2
+    lea rax, [rel str_3]
+    mov rdi, rax
+    call print_str
+    call print_newline
+    jmp L3
+L2:
+    mov rax, [rbp - 8]
     push rax
-    mov rax, 10
+    lea rax, [rel str_4]
+    mov rsi, rax
+    pop rdi
+    call str_eq
+    push rax
+    mov rax, 1
     mov rbx, rax
     pop rax
     cmp rax, rbx
@@ -103,22 +121,44 @@ L2:
     movzx rax, al
     cmp rax, 0
     je L4
-    mov rax, 0
-    mov [rbp - 16], rax
-    call print_newline
-    jmp L5
-L4:
-    mov rax, [rbp - 24]
-    mov rdi, rax
-    call print_char
-L5:
-    jmp L2
-L3:
-    lea rax, [rel str_3]
+    call clear_screen
+    lea rax, [rel str_5]
     mov rdi, rax
     call print_str
     call print_newline
+    jmp L5
+L4:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_6]
+    mov rsi, rax
+    pop rdi
+    call str_eq
+    push rax
+    mov rax, 1
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    sete al
+    movzx rax, al
+    cmp rax, 0
+    je L6
+    lea rax, [rel str_7]
+    mov rdi, rax
+    call print_str
     call print_newline
+    jmp L7
+L6:
+    lea rax, [rel str_8]
+    mov rdi, rax
+    call print_str
+    mov rax, [rbp - 8]
+    mov rdi, rax
+    call print_str
+    call print_newline
+L7:
+L5:
+L3:
     jmp L0
 L1:
 .halt:
@@ -222,6 +262,80 @@ print_newline:
     pop rax
     ret
 
+clear_screen:
+    push rax
+    push rcx
+    push rdi
+    cld
+    mov rdi, 0xB8000
+    mov rcx, 2000
+    mov ax, 0x0F20
+    rep stosw
+    mov dword [rel vga_cursor], 0
+    pop rdi
+    pop rcx
+    pop rax
+    ret
+
+read_line:
+    push rbx
+    push rcx
+    push rdx
+    push r8
+    mov rbx, rdi
+    xor rcx, rcx
+.read_loop:
+    call keyboard_read_ascii
+    cmp al, 10
+    je .read_done
+    cmp al, 8
+    jne .read_store
+    test rcx, rcx
+    jz .read_loop
+    dec rcx
+    mov rdi, 8
+    call print_char
+    jmp .read_loop
+.read_store:
+    mov rdi, rbx
+    add rdi, rcx
+    mov [rdi], al
+    inc rcx
+    mov rdi, rax
+    call print_char
+    jmp .read_loop
+.read_done:
+    mov rdi, rbx
+    add rdi, rcx
+    mov byte [rdi], 0
+    call print_newline
+    pop r8
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+str_eq:
+    push rbx
+.str_eq_loop:
+    mov al, [rdi]
+    mov bl, [rsi]
+    cmp al, bl
+    jne .str_eq_no
+    test al, al
+    jz .str_eq_yes
+    inc rdi
+    inc rsi
+    jmp .str_eq_loop
+.str_eq_yes:
+    mov rax, 1
+    pop rbx
+    ret
+.str_eq_no:
+    mov rax, 0
+    pop rbx
+    ret
+
 keyboard_read_ascii:
 .wait_ascii:
     mov dx, 0x64
@@ -234,8 +348,8 @@ keyboard_read_ascii:
     test al, 0x80
     jnz .wait_ascii
     movzx rax, al
-    lea rbx, [rel scancode_map]
-    movzx rax, byte [rbx + rax]
+    lea r8, [rel scancode_map]
+    movzx rax, byte [r8 + rax]
     test rax, rax
     jz .wait_ascii
     ret
@@ -269,10 +383,15 @@ gdt64_ptr:
     dd gdt64
 
 scancode_map: db 0,0,'1','2','3','4','5','6','7','8','9','0','-','=',8,9,'q','w','e','r','t','y','u','i','o','p','[',']',10,0,'a','s','d','f','g','h','j','k','l',';',39,'`',0,92,'z','x','c','v','b','n','m',',','.','/',0,'*',0,' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-str_2: db `donky> `, 0
-str_0: db `Donky OS Shell v1.0`, 0
-str_1: db `Type something and press Enter.`, 0
-str_3: db `Executed command!`, 0
+str_7: db `Donky OS - The Native Language`, 0
+str_3: db `Available commands: help, clear, about`, 0
+str_0: db `Donky OS Shell v1.1`, 0
+str_4: db `clear`, 0
+str_1: db `donky> `, 0
+str_5: db `Donky OS Shell v1.1`, 0
+str_6: db `about`, 0
+str_8: db `Unknown command: `, 0
+str_2: db `help`, 0
 
 section .note.Xen note alloc
 align 4
