@@ -1,6 +1,6 @@
 use crate::ast::{Expr, Stmt};
 use crate::lexer::TokenType;
-use crate::interpreter::Value;
+use crate::interpreter::{Value, MapKey};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -18,6 +18,9 @@ pub enum OpCode {
     Call(usize),
     Return,
     Array(usize),
+    Map(usize),
+    Struct(String, Vec<String>),
+    FieldAccess(String),
     Index,
     Halt,
 }
@@ -108,6 +111,7 @@ impl Compiler {
                 if let Some(e) = expr { self.compile_expr(e); } else { self.code.push(OpCode::Constant(Value::Null)); }
                 self.code.push(OpCode::Return);
             }
+            Stmt::StructDef(_, _) => {} // Handled at runtime by StructInit
             _ => {}
         }
     }
@@ -125,9 +129,29 @@ impl Compiler {
                 }
             }
             Expr::Array(elements) => {
-                let len = elements.len(); // Save length before consuming
+                let len = elements.len();
                 for el in elements { self.compile_expr(el); }
                 self.code.push(OpCode::Array(len));
+            }
+            Expr::Map(pairs) => {
+                let len = pairs.len();
+                for (k, v) in pairs {
+                    self.compile_expr(k);
+                    self.compile_expr(v);
+                }
+                self.code.push(OpCode::Map(len));
+            }
+            Expr::StructInit(name, fields) => {
+                let mut field_names = Vec::new();
+                for (f_name, f_val) in fields {
+                    self.compile_expr(f_val);
+                    field_names.push(f_name);
+                }
+                self.code.push(OpCode::Struct(name, field_names));
+            }
+            Expr::FieldAccess(obj, field) => {
+                self.compile_expr(*obj);
+                self.code.push(OpCode::FieldAccess(field));
             }
             Expr::Index(target, index) => {
                 self.compile_expr(*target);
@@ -236,20 +260,54 @@ impl VM {
                 }
                 OpCode::Array(size) => {
                     let mut elements = Vec::new();
-                    for _ in 0..*size {
-                        elements.push(self.stack.pop().unwrap_or(Value::Null));
-                    }
+                    for _ in 0..*size { elements.push(self.stack.pop().unwrap_or(Value::Null)); }
                     elements.reverse();
                     self.stack.push(Value::Array(Rc::new(RefCell::new(elements))));
+                }
+                OpCode::Map(size) => {
+                    let mut map = HashMap::new();
+                    for _ in 0..*size {
+                        let v = self.stack.pop().unwrap_or(Value::Null);
+                        let k = self.stack.pop().unwrap_or(Value::Null);
+                        if let Ok(key) = MapKey::from_value(&k) { map.insert(key, v); }
+                    }
+                    self.stack.push(Value::Map(Rc::new(RefCell::new(map))));
+                }
+                OpCode::Struct(name, fields) => {
+                    let mut map = HashMap::new();
+                    for f in fields.iter().rev() {
+                        let v = self.stack.pop().unwrap_or(Value::Null);
+                        map.insert(f.clone(), v);
+                    }
+                    self.stack.push(Value::Struct(name.clone(), Rc::new(RefCell::new(map))));
+                }
+                OpCode::FieldAccess(field) => {
+                    let target = self.stack.pop().unwrap_or(Value::Null);
+                    match target {
+                        Value::Struct(_, map) => {
+                            let borrowed = map.borrow();
+                            if let Some(v) = borrowed.get(field) { self.stack.push(v.clone()); } else { self.stack.push(Value::Null); }
+                        }
+                        _ => self.stack.push(Value::Null),
+                    }
                 }
                 OpCode::Index => {
                     let idx = self.stack.pop().unwrap_or(Value::Null);
                     let target = self.stack.pop().unwrap_or(Value::Null);
-                    if let (Value::Array(arr), Value::Number(n)) = (target, idx) {
-                        let i = n as usize;
-                        let borrowed = arr.borrow();
-                        if i < borrowed.len() { self.stack.push(borrowed[i].clone()); } else { self.stack.push(Value::Null); }
-                    } else { self.stack.push(Value::Null); }
+                    match (target, idx) {
+                        (Value::Array(arr), Value::Number(n)) => {
+                            let i = n as usize;
+                            let borrowed = arr.borrow();
+                            if i < borrowed.len() { self.stack.push(borrowed[i].clone()); } else { self.stack.push(Value::Null); }
+                        }
+                        (Value::Map(map), k) => {
+                            if let Ok(key) = MapKey::from_value(&k) {
+                                let borrowed = map.borrow();
+                                if let Some(v) = borrowed.get(&key) { self.stack.push(v.clone()); } else { self.stack.push(Value::Null); }
+                            } else { self.stack.push(Value::Null); }
+                        }
+                        _ => self.stack.push(Value::Null),
+                    }
                 }
                 OpCode::Halt => break,
             }

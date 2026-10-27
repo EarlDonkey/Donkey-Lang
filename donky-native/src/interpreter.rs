@@ -21,7 +21,7 @@ fn get_counter() -> &'static Mutex<usize> { COUNTER.get_or_init(|| Mutex::new(1)
 pub enum MapKey { String(String), Number(usize), Bool(bool) }
 
 impl MapKey {
-    fn from_value(v: &Value) -> Result<MapKey, String> {
+    pub fn from_value(v: &Value) -> Result<MapKey, String> {
         match v {
             Value::String(s) => Ok(MapKey::String(s.clone())),
             Value::Number(n) => Ok(MapKey::Number(n.to_bits() as usize)),
@@ -280,13 +280,13 @@ impl Interpreter {
                 match self.evaluate(*obj)? {
                     Value::Struct(_, fields) => match fields.borrow().get(&field) {
                         Some(v) => Ok(v.clone()),
-                        None => Ok(Value::Null), 
+                        None => Ok(Value::Null),
                     },
                     Value::Map(map) => {
                         let key = MapKey::String(field.clone());
                         match map.borrow().get(&key) {
                             Some(v) => Ok(v.clone()),
-                            None => Ok(Value::Null), 
+                            None => Ok(Value::Null),
                         }
                     }
                     _ => Ok(Value::Null),

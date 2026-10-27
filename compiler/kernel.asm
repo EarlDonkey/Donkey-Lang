@@ -68,6 +68,10 @@ long_mode:
     mov rdi, rax
     call alloc
     mov [rbp - 8], rax
+    mov rax, 256
+    mov rdi, rax
+    call alloc
+    mov [rbp - 16], rax
 L0:
     mov rax, 1
     push rax
@@ -207,7 +211,7 @@ L10:
     lea rax, [rel str_12]
     mov rsi, rax
     pop rdi
-    call str_eq
+    call str_starts_with
     push rax
     mov rax, 1
     mov rbx, rax
@@ -217,10 +221,21 @@ L10:
     movzx rax, al
     cmp rax, 0
     je L12
+    mov rax, [rbp - 16]
+    push rax
+    mov rax, [rbp - 8]
+    push rax
+    mov rax, 5
+    mov rsi, rax
+    pop rdi
+    call str_skip
+    mov rsi, rax
+    pop rdi
+    call str_copy
     lea rax, [rel str_13]
     mov rdi, rax
     call print_str
-    call reboot
+    call print_newline
     jmp L13
 L12:
     mov rax, [rbp - 8]
@@ -241,16 +256,63 @@ L12:
     lea rax, [rel str_15]
     mov rdi, rax
     call print_str
-    call shutdown
+    mov rax, [rbp - 16]
+    mov rdi, rax
+    call print_str
+    call print_newline
     jmp L15
 L14:
+    mov rax, [rbp - 8]
+    push rax
     lea rax, [rel str_16]
+    mov rsi, rax
+    pop rdi
+    call str_eq
+    push rax
+    mov rax, 1
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    sete al
+    movzx rax, al
+    cmp rax, 0
+    je L16
+    lea rax, [rel str_17]
+    mov rdi, rax
+    call print_str
+    call reboot
+    jmp L17
+L16:
+    mov rax, [rbp - 8]
+    push rax
+    lea rax, [rel str_18]
+    mov rsi, rax
+    pop rdi
+    call str_eq
+    push rax
+    mov rax, 1
+    mov rbx, rax
+    pop rax
+    cmp rax, rbx
+    sete al
+    movzx rax, al
+    cmp rax, 0
+    je L18
+    lea rax, [rel str_19]
+    mov rdi, rax
+    call print_str
+    call shutdown
+    jmp L19
+L18:
+    lea rax, [rel str_20]
     mov rdi, rax
     call print_str
     mov rax, [rbp - 8]
     mov rdi, rax
     call print_str
     call print_newline
+L19:
+L17:
 L15:
 L13:
 L11:
@@ -467,6 +529,20 @@ str_skip:
 .skip_done:
     ret
 
+str_copy:
+    push rax
+.copy_loop:
+    mov al, [rsi]
+    mov [rdi], al
+    test al, al
+    jz .copy_done
+    inc rdi
+    inc rsi
+    jmp .copy_loop
+.copy_done:
+    pop rax
+    ret
+
 get_heap:
     mov rax, [rel heap_ptr]
     ret
@@ -518,23 +594,27 @@ gdt64_ptr:
     dd gdt64
 
 scancode_map: db 0,0,'1','2','3','4','5','6','7','8','9','0','-','=',8,9,'q','w','e','r','t','y','u','i','o','p','[',']',10,0,'a','s','d','f','g','h','j','k','l',';',39,'`',0,92,'z','x','c','v','b','n','m',',','.','/',0,'*',0,' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-str_5: db `Donky OS Shell v1.4`, 0
 str_1: db `donky> `, 0
-str_9: db `Current Heap Pointer: `, 0
-str_10: db `echo `, 0
-str_14: db `shutdown`, 0
-str_6: db `about`, 0
-str_0: db `Donky OS Shell v1.4`, 0
-str_13: db `Rebooting...`, 0
-str_11: db `Echo: `, 0
-str_2: db `help`, 0
+str_13: db `Saved to RAM disk.`, 0
+str_18: db `shutdown`, 0
+str_16: db `reboot`, 0
+str_19: db `Shutting down...`, 0
 str_4: db `clear`, 0
-str_8: db `mem`, 0
-str_12: db `reboot`, 0
-str_16: db `Unknown command: `, 0
+str_12: db `save `, 0
 str_7: db `Donky OS - The Native Language`, 0
-str_15: db `Shutting down...`, 0
-str_3: db `Commands: help, clear, about, mem, echo <text>, reboot, shutdown`, 0
+str_0: db `Donky OS Shell v1.5`, 0
+str_9: db `Current Heap Pointer: `, 0
+str_3: db `Commands: help, clear, about, mem, echo <text>, reboot, shutdown, save <text>, load`, 0
+str_10: db `echo `, 0
+str_11: db `Echo: `, 0
+str_17: db `Rebooting...`, 0
+str_6: db `about`, 0
+str_20: db `Unknown command: `, 0
+str_2: db `help`, 0
+str_5: db `Donky OS Shell v1.5`, 0
+str_8: db `mem`, 0
+str_14: db `load`, 0
+str_15: db `RAM Disk: `, 0
 section .note.Xen note alloc
 align 4
     dd 4

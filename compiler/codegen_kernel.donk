@@ -72,6 +72,12 @@ fn gen_expr(state, node) -> void {
         else if name == "get_heap" { emit(state, "    call get_heap"); }
         else if name == "reboot" { emit(state, "    call reboot"); }
         else if name == "shutdown" { emit(state, "    call shutdown"); }
+        else if name == "str_copy" { 
+            if len(args) > 1 {
+                gen_expr(state, args[0]); emit(state, "    push rax");
+                gen_expr(state, args[1]); emit(state, "    mov rsi, rax"); emit(state, "    pop rdi"); emit(state, "    call str_copy");
+            }
+        }
         else if name == "str_skip" { 
             if len(args) > 1 {
                 gen_expr(state, args[0]); emit(state, "    push rax");
@@ -178,6 +184,7 @@ fn compile_to_kernel(ast) -> str {
     emit(state, "str_eq:\n    push rbx\n.str_eq_loop:\n    mov al, [rdi]\n    mov bl, [rsi]\n    cmp al, bl\n    jne .str_eq_no\n    test al, al\n    jz .str_eq_yes\n    inc rdi\n    inc rsi\n    jmp .str_eq_loop\n.str_eq_yes:\n    mov rax, 1\n    pop rbx\n    ret\n.str_eq_no:\n    mov rax, 0\n    pop rbx\n    ret\n");
     emit(state, "str_starts_with:\n    push rbx\n.loop_ss:\n    mov al, [rsi]\n    test al, al\n    jz .yes_ss\n    mov bl, [rdi]\n    cmp al, bl\n    jne .no_ss\n    inc rdi\n    inc rsi\n    jmp .loop_ss\n.yes_ss:\n    mov rax, 1\n    pop rbx\n    ret\n.no_ss:\n    mov rax, 0\n    pop rbx\n    ret\n");
     emit(state, "str_skip:\n    mov rax, rdi\n.skip_loop:\n    test rsi, rsi\n    jz .skip_done\n    inc rax\n    dec rsi\n    jmp .skip_loop\n.skip_done:\n    ret\n");
+    emit(state, "str_copy:\n    push rax\n.copy_loop:\n    mov al, [rsi]\n    mov [rdi], al\n    test al, al\n    jz .copy_done\n    inc rdi\n    inc rsi\n    jmp .copy_loop\n.copy_done:\n    pop rax\n    ret\n");
     emit(state, "get_heap:\n    mov rax, [rel heap_ptr]\n    ret\n");
     emit(state, "reboot:\n    mov al, 0xFE\n    out 0x64, al\n    ret\n");
     emit(state, "shutdown:\n    mov dx, 0x604\n    mov ax, 0x2000\n    out dx, ax\n    ret\n");

@@ -1,19 +1,20 @@
-print("Donky OS Shell v1.4");
+print("Donky OS Shell v1.5");
 print_newline();
 print_newline();
 
 let buf = alloc(128);
+let disk = alloc(256);
 
 while 1 == 1 {
     print("donky> ");
     read_line(buf);
 
     if str_eq(buf, "help") == 1 {
-        print("Commands: help, clear, about, mem, echo <text>, reboot, shutdown");
+        print("Commands: help, clear, about, mem, echo <text>, reboot, shutdown, save <text>, load");
         print_newline();
     } else if str_eq(buf, "clear") == 1 {
         clear_screen();
-        print("Donky OS Shell v1.4");
+        print("Donky OS Shell v1.5");
         print_newline();
     } else if str_eq(buf, "about") == 1 {
         print("Donky OS - The Native Language");
@@ -25,6 +26,14 @@ while 1 == 1 {
     } else if str_starts_with(buf, "echo ") == 1 {
         print("Echo: ");
         print_str(str_skip(buf, 5));
+        print_newline();
+    } else if str_starts_with(buf, "save ") == 1 {
+        str_copy(disk, str_skip(buf, 5));
+        print("Saved to RAM disk.");
+        print_newline();
+    } else if str_eq(buf, "load") == 1 {
+        print("RAM Disk: ");
+        print_str(disk);
         print_newline();
     } else if str_eq(buf, "reboot") == 1 {
         print("Rebooting...");

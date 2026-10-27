@@ -1,0 +1,9 @@
+struct Point {
+    x: num,
+    y: num
+}
+
+let p = Point { x: 10, y: 20 };
+let m = { "name": "Donky", "val": p.x };
+print(m["name"]);
+print(m["val"]);
