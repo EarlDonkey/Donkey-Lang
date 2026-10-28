@@ -28,8 +28,11 @@ pub enum OpCode {
     StringConst(u32),
     Add, Sub, Mul, Div, Eq, NotEq, Lt, Gt, LtEq, GtEq,
     Negate, Not,
-    Print, Jump(usize), JumpIfFalse(usize), GetLocal(usize), SetLocal(usize),
+    Print, Jump(usize), JumpIfFalse(usize), JumpIfTrue(usize), GetLocal(usize), SetLocal(usize),
     DefineFunction(String, usize, usize),
+    DefineFunctionGlobal(String, usize, usize, u32),
+    GetGlobal(u32),
+    SetGlobal(u32),
     Call(usize), Builtin(String, usize), MethodCall(String, usize),
     Return, Array(usize), Map(usize), Struct(String, Vec<String>),
     FieldAccess(String), FieldSet(String),
@@ -77,7 +80,7 @@ fn peephole(code: Vec<OpCode>) -> Vec<OpCode> {
     let mut targets: HashSet<usize> = HashSet::new();
     for op in &code {
         match op {
-            OpCode::Jump(t) | OpCode::JumpIfFalse(t) | OpCode::TryStart(t)
+            OpCode::Jump(t) | OpCode::JumpIfFalse(t) | OpCode::JumpIfTrue(t) | OpCode::TryStart(t)
             | OpCode::JumpIfLocalCmpFalse(_, _, _, t) | OpCode::IncLocalJump(_, _, t)
             | OpCode::JumpIfLocalConstCmpFalse(_, _, _, t) => { targets.insert(*t); }
             _ => {}
@@ -152,7 +155,7 @@ fn peephole(code: Vec<OpCode>) -> Vec<OpCode> {
     old_to_new[code.len()] = new_code.len();
     for op in new_code.iter_mut() {
         match op {
-            OpCode::Jump(t) | OpCode::JumpIfFalse(t) | OpCode::TryStart(t) => { if *t <= code.len() { *t = old_to_new[*t]; } }
+            OpCode::Jump(t) | OpCode::JumpIfFalse(t) | OpCode::JumpIfTrue(t) | OpCode::TryStart(t) => { if *t <= code.len() { *t = old_to_new[*t]; } }
             OpCode::JumpIfLocalCmpFalse(_, _, _, t) => { if *t <= code.len() { *t = old_to_new[*t]; } }
             OpCode::IncLocalJump(_, _, t) => { if *t <= code.len() { *t = old_to_new[*t]; } }
             OpCode::JumpIfLocalConstCmpFalse(_, _, _, t) => { if *t <= code.len() { *t = old_to_new[*t]; } }
@@ -214,6 +217,8 @@ pub struct Compiler {
     functions: Rc<RefCell<Vec<Vec<OpCode>>>>,
     string_pool: Rc<RefCell<Vec<String>>>,
     string_map: Rc<RefCell<HashMap<String, u32>>>,
+    globals: Rc<RefCell<HashMap<String, u32>>>,
+    is_main: bool,
 }
 
 impl Compiler {
@@ -226,6 +231,8 @@ impl Compiler {
             functions: Rc::new(RefCell::new(Vec::new())),
             string_pool: Rc::new(RefCell::new(Vec::new())),
             string_map: Rc::new(RefCell::new(HashMap::new())),
+            globals: Rc::new(RefCell::new(HashMap::new())),
+            is_main: true,
         }
     }
 
@@ -237,7 +244,41 @@ impl Compiler {
         idx
     }
 
+    fn alloc_global(&mut self, name: &str) -> u32 {
+        let mut g = self.globals.borrow_mut();
+        if let Some(&s) = g.get(name) { return s; }
+        let s = g.len() as u32;
+        g.insert(name.to_string(), s);
+        s
+    }
+
+    fn lookup_global(&self, name: &str) -> Option<u32> {
+        self.globals.borrow().get(name).copied()
+    }
+
+    /// Pre-pass: allocate global slots for every top-level function so that
+    /// forward references (A calls B where B is defined later) and recursion
+    /// work from inside any function body.
+    fn prepass_globals(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Function(name, _, _) => { self.alloc_global(name); }
+                Stmt::Import(path) => {
+                    if let Ok(content) = fs::read_to_string(path) {
+                        if let Ok(tokens) = Lexer::new(&content).tokenize() {
+                            if let Ok(ast) = Parser::new(tokens).parse() {
+                                self.prepass_globals(&ast);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub fn compile(mut self, stmts: Vec<Stmt>) -> (Vec<OpCode>, Vec<Vec<OpCode>>, Vec<String>) {
+        self.prepass_globals(&stmts);
         for stmt in stmts { self.compile_stmt(stmt); }
         self.code.push(PendingOp::Ready(OpCode::Halt));
         let main_raw = resolve_pending(std::mem::take(&mut self.code), self.next_local);
@@ -279,6 +320,8 @@ impl Compiler {
             functions: self.functions.clone(),
             string_pool: self.string_pool.clone(),
             string_map: self.string_map.clone(),
+            globals: self.globals.clone(),
+            is_main: false,
         };
         for (i, p) in params.iter().enumerate() { sub.locals.insert(p.clone(), i); }
         sub.next_local = params.len();
@@ -339,25 +382,39 @@ impl Compiler {
                 let tokens = match lex.tokenize() { Ok(t) => t, Err(_) => return };
                 let mut parser = Parser::new(tokens);
                 let imported = match parser.parse() { Ok(a) => a, Err(_) => return };
+                self.prepass_globals(&imported);
                 for s in imported { self.compile_stmt(s); }
             }
             Stmt::Block(stmts) => {
                 let saved = self.locals.clone();
+                let saved_is_main = self.is_main;
+                self.is_main = false;
                 for s in stmts { self.compile_stmt(s); }
+                self.is_main = saved_is_main;
                 self.locals = saved;
             }
             Stmt::Let(name, expr) => {
                 self.compile_expr(expr);
-                let slot = self.next_local; self.locals.insert(name, slot); self.next_local += 1;
+                let slot = self.next_local; self.locals.insert(name.clone(), slot); self.next_local += 1;
+                if self.is_main {
+                    let gslot = self.alloc_global(&name);
+                    self.code.push(PendingOp::Ready(OpCode::Dup));
+                    self.code.push(PendingOp::Ready(OpCode::SetGlobal(gslot)));
+                }
                 self.code.push(PendingOp::Ready(OpCode::SetLocal(slot)));
             }
             Stmt::Print(expr) => { self.compile_expr(expr); self.code.push(PendingOp::Ready(OpCode::Print)); }
             Stmt::Assign(name, expr) => {
                 self.compile_expr(expr);
-                if let Some(&slot) = self.locals.get(&name) { self.code.push(PendingOp::Ready(OpCode::SetLocal(slot))); }
-                else {
+                if let Some(&slot) = self.locals.get(&name) {
+                    self.code.push(PendingOp::Ready(OpCode::SetLocal(slot)));
+                } else {
                     let uv: Option<usize> = self.upvalues.borrow().map.get(&name).copied();
-                    if let Some(idx) = uv { self.code.push(PendingOp::SetUpvalue(idx)); }
+                    if let Some(idx) = uv {
+                        self.code.push(PendingOp::SetUpvalue(idx));
+                    } else if let Some(gslot) = self.lookup_global(&name) {
+                        self.code.push(PendingOp::Ready(OpCode::SetGlobal(gslot)));
+                    }
                 }
             }
             Stmt::FieldSet(obj, field, val) => {
@@ -365,10 +422,12 @@ impl Compiler {
                 self.code.push(PendingOp::Ready(OpCode::FieldSet(field)));
             }
             Stmt::IndexSet(name, idx_expr, val_expr) => {
-                if let Some(&slot) = self.locals.get(&name) { self.code.push(PendingOp::Ready(OpCode::GetLocal(slot))); }
-                else {
+                if let Some(&slot) = self.locals.get(&name) {
+                    self.code.push(PendingOp::Ready(OpCode::GetLocal(slot)));
+                } else {
                     let uv: Option<usize> = self.upvalues.borrow().map.get(&name).copied();
                     if let Some(idx) = uv { self.code.push(PendingOp::GetUpvalue(idx)); }
+                    else if let Some(gslot) = self.lookup_global(&name) { self.code.push(PendingOp::Ready(OpCode::GetGlobal(gslot))); }
                     else { self.code.push(PendingOp::Ready(OpCode::ConstantNull)); }
                 }
                 self.compile_expr(idx_expr); self.compile_expr(val_expr);
@@ -459,7 +518,13 @@ impl Compiler {
                 }
                 let (idx, _caps, _np, _nl) = self.compile_function(final_params, body, false);
                 let slot = self.next_local; self.locals.insert(name.clone(), slot); self.next_local += 1;
-                self.code.push(PendingOp::Ready(OpCode::DefineFunction(name, idx, slot)));
+                if self.is_main {
+                    // prepass_globals already allocated this slot for top-level fns
+                    let gslot = self.lookup_global(&name).unwrap_or_else(|| self.alloc_global(&name));
+                    self.code.push(PendingOp::Ready(OpCode::DefineFunctionGlobal(name, idx, slot, gslot)));
+                } else {
+                    self.code.push(PendingOp::Ready(OpCode::DefineFunction(name, idx, slot)));
+                }
             }
             Stmt::Return(expr) => {
                 if let Some(e) = expr { self.compile_expr(e); } else { self.code.push(PendingOp::Ready(OpCode::ConstantNull)); }
@@ -489,17 +554,27 @@ impl Compiler {
             Expr::String(s) => { let idx = self.intern(s); self.code.push(PendingOp::Ready(OpCode::StringConst(idx))); }
             Expr::Bool(b) => self.code.push(PendingOp::Ready(OpCode::ConstantBool(b))),
             Expr::Ident(name) => {
-                if let Some(&slot) = self.locals.get(&name) { self.code.push(PendingOp::Ready(OpCode::GetLocal(slot))); }
-                else {
+                if let Some(&slot) = self.locals.get(&name) {
+                    self.code.push(PendingOp::Ready(OpCode::GetLocal(slot)));
+                } else {
                     let uv: Option<usize> = self.upvalues.borrow().map.get(&name).copied();
-                    if let Some(idx) = uv { self.code.push(PendingOp::GetUpvalue(idx)); }
-                    else if let Some(enc) = self.enclosing.clone() {
+                    if let Some(idx) = uv {
+                        self.code.push(PendingOp::GetUpvalue(idx));
+                    } else if let Some(enc) = self.enclosing.clone() {
                         if Self::ensure_enclosing_captures(&enc, &name).is_some() {
                             let idx = { let mut u = self.upvalues.borrow_mut(); if let Some(&i) = u.map.get(&name) { i } else { let i = u.map.len(); u.map.insert(name.clone(), i); u.list.push(name.clone()); i } };
                             self.captured_names.borrow_mut().push(name.clone());
                             self.code.push(PendingOp::GetUpvalue(idx));
-                        } else { self.code.push(PendingOp::Ready(OpCode::ConstantNull)); }
-                    } else { self.code.push(PendingOp::Ready(OpCode::ConstantNull)); }
+                        } else if let Some(gslot) = self.lookup_global(&name) {
+                            self.code.push(PendingOp::Ready(OpCode::GetGlobal(gslot)));
+                        } else {
+                            self.code.push(PendingOp::Ready(OpCode::ConstantNull));
+                        }
+                    } else if let Some(gslot) = self.lookup_global(&name) {
+                        self.code.push(PendingOp::Ready(OpCode::GetGlobal(gslot)));
+                    } else {
+                        self.code.push(PendingOp::Ready(OpCode::ConstantNull));
+                    }
                 }
             }
             Expr::InterpolatedString(parts) => {
@@ -542,14 +617,18 @@ impl Compiler {
             }
             Expr::Call(name, args) => {
                 for a in args.iter().rev() { self.compile_expr(a.clone()); }
-                if is_builtin(&name) { self.code.push(PendingOp::Ready(OpCode::Builtin(name, args.len()))); }
-                else if let Some(&slot) = self.locals.get(&name) {
+                if is_builtin(&name) {
+                    self.code.push(PendingOp::Ready(OpCode::Builtin(name, args.len())));
+                } else if let Some(&slot) = self.locals.get(&name) {
                     self.code.push(PendingOp::Ready(OpCode::GetLocal(slot)));
                     self.code.push(PendingOp::Ready(OpCode::Call(args.len())));
                 } else {
                     let uv: Option<usize> = self.upvalues.borrow().map.get(&name).copied();
                     if let Some(idx) = uv {
                         self.code.push(PendingOp::GetUpvalue(idx));
+                        self.code.push(PendingOp::Ready(OpCode::Call(args.len())));
+                    } else if let Some(gslot) = self.lookup_global(&name) {
+                        self.code.push(PendingOp::Ready(OpCode::GetGlobal(gslot)));
                         self.code.push(PendingOp::Ready(OpCode::Call(args.len())));
                     } else {
                         for _ in 0..args.len() { self.code.push(PendingOp::Ready(OpCode::Pop)); }
@@ -562,6 +641,28 @@ impl Compiler {
                 match op { TokenType::Minus => self.code.push(PendingOp::Ready(OpCode::Negate)), TokenType::Bang => self.code.push(PendingOp::Ready(OpCode::Not)), _ => {} }
             }
             Expr::Binary(l, op, r) => {
+                if op == TokenType::And {
+                    self.compile_expr(*l);
+                    let jif_idx = self.code.len();
+                    self.code.push(PendingOp::Ready(OpCode::Dup));
+                    self.code.push(PendingOp::Ready(OpCode::JumpIfFalse(0)));
+                    self.code.push(PendingOp::Ready(OpCode::Pop));
+                    self.compile_expr(*r);
+                    let end = self.code.len();
+                    if let PendingOp::Ready(OpCode::JumpIfFalse(t)) = &mut self.code[jif_idx + 1] { *t = end; }
+                    return;
+                }
+                if op == TokenType::Or {
+                    self.compile_expr(*l);
+                    let jit_idx = self.code.len();
+                    self.code.push(PendingOp::Ready(OpCode::Dup));
+                    self.code.push(PendingOp::Ready(OpCode::JumpIfTrue(0)));
+                    self.code.push(PendingOp::Ready(OpCode::Pop));
+                    self.compile_expr(*r);
+                    let end = self.code.len();
+                    if let PendingOp::Ready(OpCode::JumpIfTrue(t)) = &mut self.code[jit_idx + 1] { *t = end; }
+                    return;
+                }
                 self.compile_expr(*l); self.compile_expr(*r);
                 let oc = match op {
                     TokenType::Plus => OpCode::Add, TokenType::Minus => OpCode::Sub,
@@ -593,7 +694,7 @@ fn is_builtin(name: &str) -> bool {
         | "str_eq" | "char_code" | "byte_at" | "byte_substr" | "bytes_to_str"
         | "read_file" | "write_file" | "file_exists" | "list_dir" | "mkdir"
         | "random" | "clear_screen" | "print_str" | "print_char" | "read_line" | "input"
-        | "tcp_listen" | "tcp_accept" | "tcp_read" | "tcp_write" | "tcp_close" | "http_get"
+        | "tcp_listen" | "tcp_accept" | "tcp_read" | "tcp_write" | "tcp_close" | "http_get" | "system"
     )
 }
 
@@ -625,8 +726,6 @@ fn builtin_impl(heap: &mut Heap, name: &str, args: Vec<Value>) -> Result<Value, 
         "pop" => { if let Some(v) = args.get(0) { if v.is_array() { return Ok(heap.get_array_mut(v.payload()).pop().unwrap_or(Value::null())); } } Err("pop() expects array".to_string()) }
         "keys" => {
             if let Some(v) = args.get(0) { if v.is_map() {
-                // FIX: snapshot the keys first, releasing the immutable heap
-                // borrow before we allocate Strings inside the loop.
                 let key_list: Vec<MapKey> = heap.get_map(v.payload()).keys().cloned().collect();
                 let mut keys = Vec::with_capacity(key_list.len());
                 for k in key_list {
@@ -852,6 +951,25 @@ fn builtin_impl(heap: &mut Heap, name: &str, args: Vec<Value>) -> Result<Value, 
             } }
             Err("http_get()".to_string())
         }
+        "system" => {
+            if let Some(v) = args.get(0) { if v.is_string() {
+                let cmd = heap.get_string(v.payload()).clone();
+                #[cfg(windows)]
+                let output = std::process::Command::new("cmd").args(&["/C", &cmd]).output();
+                #[cfg(not(windows))]
+                let output = std::process::Command::new("sh").args(&["-c", &cmd]).output();
+                match output {
+                    Ok(out) => {
+                        let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+                        s.push_str(&String::from_utf8_lossy(&out.stderr));
+                        let i = heap.alloc(HeapObject::String(s));
+                        return Ok(Value::string(i));
+                    }
+                    Err(e) => return Err(format!("system() failed: {}", e)),
+                }
+            } }
+            Err("system() expects string".to_string())
+        }
         _ => Err(format!("Unknown builtin: {}", name)),
     }
 }
@@ -870,6 +988,7 @@ struct Handler {
 pub struct VM {
     stack: Vec<Value>,
     locals: Vec<Value>,
+    globals: Vec<Value>,
     frames: Vec<Vec<Value>>,
     functions: Vec<Vec<OpCode>>,
     functions_by_name: HashMap<String, u32>,
@@ -883,7 +1002,7 @@ pub struct VM {
 impl VM {
     pub fn new() -> Self {
         VM {
-            stack: Vec::new(), locals: Vec::new(), frames: Vec::new(),
+            stack: Vec::new(), locals: Vec::new(), globals: Vec::new(), frames: Vec::new(),
             functions: Vec::new(), functions_by_name: HashMap::new(),
             call_stack: Vec::new(), closure_stack: Vec::new(),
             handlers: Vec::new(), string_pool_heap: Vec::new(),
@@ -898,7 +1017,7 @@ impl VM {
             .collect();
 
         let Self {
-            stack, locals, frames, functions, functions_by_name,
+            stack, locals, globals, frames, functions, functions_by_name,
             call_stack, closure_stack, handlers, string_pool_heap, heap,
         } = self;
 
@@ -906,9 +1025,10 @@ impl VM {
         let mut current_code: Vec<OpCode> = code.clone();
 
         macro_rules! roots { () => {{
-            let mut r = Vec::with_capacity(stack.len() + locals.len());
+            let mut r = Vec::with_capacity(stack.len() + locals.len() + globals.len());
             r.extend_from_slice(stack);
             r.extend_from_slice(locals);
+            r.extend_from_slice(globals);
             r
         }}}
 
@@ -1054,6 +1174,23 @@ impl VM {
                     locals[*slot] = Value::function(heap_idx);
                     functions_by_name.insert(name.clone(), *idx as u32);
                 }
+                OpCode::DefineFunctionGlobal(name, idx, local_slot, global_slot) => {
+                    let heap_idx = heap.alloc(HeapObject::CodeFunction(*idx as u32));
+                    if locals.len() <= *local_slot { locals.resize(*local_slot + 1, Value::null()); }
+                    locals[*local_slot] = Value::function(heap_idx);
+                    if globals.len() <= *global_slot as usize { globals.resize(*global_slot as usize + 1, Value::null()); }
+                    globals[*global_slot as usize] = Value::function(heap_idx);
+                    functions_by_name.insert(name.clone(), *idx as u32);
+                }
+                OpCode::GetGlobal(slot) => {
+                    let v = globals.get(*slot as usize).copied().unwrap_or(Value::null());
+                    stack.push(v);
+                }
+                OpCode::SetGlobal(slot) => {
+                    let val = stack.pop().unwrap_or(Value::null());
+                    if globals.len() <= *slot as usize { globals.resize(*slot as usize + 1, Value::null()); }
+                    globals[*slot as usize] = val;
+                }
 
                 OpCode::Builtin(name, arg_count) => {
                     if heap.needs_gc() { let r = roots!(); heap.collect_garbage(&r); }
@@ -1075,6 +1212,10 @@ impl VM {
                 OpCode::JumpIfFalse(target) => {
                     let val = stack.pop().unwrap_or(Value::null());
                     if !val.is_truthy() { ip = *target; continue; }
+                }
+                OpCode::JumpIfTrue(target) => {
+                    let val = stack.pop().unwrap_or(Value::null());
+                    if val.is_truthy() { ip = *target; continue; }
                 }
 
                 OpCode::MethodCall(method, arg_count) => {

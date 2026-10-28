@@ -752,6 +752,25 @@ impl Interpreter {
                 }
                 return Err("bytes_to_str()".to_string());
             }
+            "system" => {
+                if let Some(idx) = arg_vals.get(0).filter(|v| v.is_string()).map(|v| v.payload()) {
+                    let cmd = self.heap.get_string(idx).clone();
+                    #[cfg(windows)]
+                    let output = std::process::Command::new("cmd").args(&["/C", &cmd]).output();
+                    #[cfg(not(windows))]
+                    let output = std::process::Command::new("sh").args(&["-c", &cmd]).output();
+                    match output {
+                        Ok(out) => {
+                            let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+                            s.push_str(&String::from_utf8_lossy(&out.stderr));
+                            let sidx = self.heap.alloc(HeapObject::String(s));
+                            return Ok(Value::string(sidx));
+                        }
+                        Err(e) => return Err(format!("system() failed: {}", e)),
+                    }
+                }
+                return Err("system() expects string".to_string());
+            }
             _ => {}
         }
 
