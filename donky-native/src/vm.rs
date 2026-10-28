@@ -19,6 +19,9 @@ fn get_clients() -> &'static Mutex<HashMap<usize, TcpStream>> { CLIENTS.get_or_i
 fn get_servers() -> &'static Mutex<HashMap<usize, TcpListener>> { SERVERS.get_or_init(|| Mutex::new(HashMap::new())) }
 fn get_counter() -> &'static Mutex<usize> { COUNTER.get_or_init(|| Mutex::new(1)) }
 
+/// `repr(C, u8)`: 1-byte discriminant at offset 0, C-compatible field layout.
+/// Makes `match op { ... }` compile to a stable byte load + jump table.
+#[repr(C, u8)]
 #[derive(Debug, Clone)]
 pub enum OpCode {
     Constant(Value), Add, Sub, Mul, Div, Eq, NotEq, Lt, Gt, LtEq, GtEq,
@@ -684,6 +687,291 @@ fn is_builtin(name: &str) -> bool {
     )
 }
 
+// ===================== FREE FUNCTIONS (extracted from &mut self) =====================
+
+fn compute_roots(stack: &[Value], locals: &[Value]) -> Vec<Value> {
+    let mut r = Vec::with_capacity(stack.len() + locals.len());
+    r.extend_from_slice(stack);
+    r.extend_from_slice(locals);
+    r
+}
+
+fn builtin_impl(heap: &mut Heap, name: &str, args: Vec<Value>) -> Result<Value, String> {
+    match name {
+        "str" => Ok(Value::String(args.get(0).unwrap_or(&Value::Null).to_string())),
+        "num" => match args.get(0).unwrap_or(&Value::Null) {
+            Value::Number(n) => Ok(Value::Number(*n)),
+            Value::String(s) => s.parse::<f64>().map(Value::Number).map_err(|_| format!("num() cannot parse {:?}", s)),
+            _ => Err("num() expects string or number".to_string()),
+        },
+        "type" => {
+            let t = match args.get(0).unwrap_or(&Value::Null) {
+                Value::Number(_) => "number", Value::String(_) => "string", Value::Bool(_) => "bool",
+                Value::Array(_) => "array", Value::Map(_) => "map", Value::Struct(..) => "struct",
+                Value::Function { .. } => "function", Value::Closure(..) => "function", Value::Null => "null",
+            };
+            Ok(Value::String(t.to_string()))
+        }
+        "len" => match args.get(0).unwrap_or(&Value::Null) {
+            Value::String(s) => Ok(Value::Number(s.len() as f64)),
+            Value::Array(idx) => if let HeapObject::Array(arr) = heap.get(*idx) { Ok(Value::Number(arr.len() as f64)) } else { Err("Not array".to_string()) },
+            Value::Map(idx) => if let HeapObject::Map(map) = heap.get(*idx) { Ok(Value::Number(map.len() as f64)) } else { Err("Not map".to_string()) },
+            _ => Err("len() expects collection".to_string()),
+        },
+        "push" => {
+            let v = args.get(1).cloned().unwrap_or(Value::Null);
+            if let Some(Value::Array(idx)) = args.get(0) {
+                if let HeapObject::Array(arr) = heap.get_mut(*idx) { arr.push(v); }
+            }
+            Ok(Value::Null)
+        }
+        "pop" => {
+            if let Some(Value::Array(idx)) = args.get(0) {
+                if let HeapObject::Array(arr) = heap.get_mut(*idx) { return Ok(arr.pop().unwrap_or(Value::Null)); }
+            }
+            Err("pop() expects array".to_string())
+        }
+        "keys" => {
+            if let Some(Value::Map(idx)) = args.get(0) {
+                let mut keys = Vec::new();
+                if let HeapObject::Map(map) = heap.get(*idx) {
+                    for k in map.keys() {
+                        let kv = match k {
+                            MapKey::String(s) => Value::String(s.clone()),
+                            MapKey::Number(n) => Value::Number(f64::from_bits(*n as u64)),
+                            MapKey::Bool(b) => Value::Bool(*b),
+                        };
+                        keys.push(kv);
+                    }
+                }
+                let out = heap.alloc(HeapObject::Array(keys));
+                return Ok(Value::Array(out));
+            }
+            Err("keys() expects map".to_string())
+        }
+        "split" => {
+            if let (Some(Value::String(sv)), Some(Value::String(sep))) = (args.get(0), args.get(1)) {
+                if sep.is_empty() { return Err("split() sep empty".to_string()); }
+                let parts: Vec<Value> = sv.split(sep.as_str()).map(|p| Value::String(p.to_string())).collect();
+                let idx = heap.alloc(HeapObject::Array(parts));
+                Ok(Value::Array(idx))
+            } else { Err("split() expects two strings".to_string()) }
+        }
+        "join" => {
+            if let (Some(Value::Array(idx)), Some(Value::String(sep))) = (args.get(0), args.get(1)) {
+                if let HeapObject::Array(arr) = heap.get(*idx) {
+                    let mut parts = Vec::new();
+                    for item in arr.iter() {
+                        if let Value::String(s) = item { parts.push(s.clone()); }
+                        else { return Err("join() expects strings".to_string()); }
+                    }
+                    return Ok(Value::String(parts.join(sep)));
+                }
+            }
+            Err("join() expects array and string".to_string())
+        }
+        "upper" => match args.get(0) { Some(Value::String(s)) => Ok(Value::String(s.to_uppercase())), _ => Err("upper()".to_string()) },
+        "lower" => match args.get(0) { Some(Value::String(s)) => Ok(Value::String(s.to_lowercase())), _ => Err("lower()".to_string()) },
+        "trim" => match args.get(0) { Some(Value::String(s)) => Ok(Value::String(s.trim().to_string())), _ => Err("trim()".to_string()) },
+        "replace" => {
+            if let (Some(Value::String(sv)), Some(Value::String(ov)), Some(Value::String(nv))) = (args.get(0), args.get(1), args.get(2)) {
+                Ok(Value::String(sv.replace(ov, nv)))
+            } else { Err("replace()".to_string()) }
+        }
+        "contains" => match (args.get(0), args.get(1)) {
+            (Some(Value::String(s)), Some(Value::String(sub))) => Ok(Value::Bool(s.contains(sub))),
+            (Some(Value::Array(idx)), Some(v)) => {
+                if let HeapObject::Array(arr) = heap.get(*idx) {
+                    Ok(Value::Bool(arr.iter().any(|x| x.to_string() == v.to_string())))
+                } else { Err("Not array".to_string()) }
+            }
+            (Some(Value::Map(idx)), Some(v)) => {
+                if let Ok(k) = MapKey::from_value(v) {
+                    if let HeapObject::Map(map) = heap.get(*idx) { return Ok(Value::Bool(map.contains_key(&k))); }
+                }
+                Ok(Value::Bool(false))
+            }
+            _ => Err("contains()".to_string()),
+        },
+        "str_eq" => {
+            let a = args.get(0).cloned().unwrap_or(Value::Null);
+            let b = args.get(1).cloned().unwrap_or(Value::Null);
+            Ok(Value::Number(if a.to_string() == b.to_string() { 1.0 } else { 0.0 }))
+        }
+        "char_code" => match args.get(0) {
+            Some(Value::String(s)) if s.as_bytes().len() == 1 => Ok(Value::Number(s.as_bytes()[0] as f64)),
+            _ => Err("char_code()".to_string()),
+        },
+        "byte_at" => {
+            if let (Some(Value::String(sv)), Some(Value::Number(n))) = (args.get(0), args.get(1)) {
+                let idx = *n as isize; let bytes = sv.as_bytes();
+                if idx < 0 || idx as usize >= bytes.len() { return Ok(Value::Number(-1.0)); }
+                return Ok(Value::Number(bytes[idx as usize] as f64));
+            }
+            Err("byte_at()".to_string())
+        }
+        "byte_substr" => {
+            if let (Some(Value::String(sv)), Some(Value::Number(a)), Some(Value::Number(b))) = (args.get(0), args.get(1), args.get(2)) {
+                let bytes = sv.as_bytes();
+                let mut start = if *a < 0.0 { 0 } else { *a as usize };
+                let mut end = if *b < 0.0 { 0 } else { *b as usize };
+                if start > bytes.len() { start = bytes.len(); }
+                if end > bytes.len() { end = bytes.len(); }
+                if start > end { start = end; }
+                return Ok(Value::String(String::from_utf8_lossy(&bytes[start..end]).to_string()));
+            }
+            Err("byte_substr()".to_string())
+        }
+        "bytes_to_str" => {
+            if let Some(Value::Array(idx)) = args.get(0) {
+                if let HeapObject::Array(arr) = heap.get(*idx) {
+                    let mut buf = Vec::with_capacity(arr.len());
+                    for v in arr.iter() {
+                        if let Value::Number(n) = v {
+                            let b = *n as i64;
+                            if !(0..=255).contains(&b) { return Err(format!("byte out of range: {}", b)); }
+                            buf.push(b as u8);
+                        } else { return Err("bytes_to_str()".to_string()); }
+                    }
+                    return Ok(Value::String(String::from_utf8_lossy(&buf).to_string()));
+                }
+            }
+            Err("bytes_to_str()".to_string())
+        }
+        "read_file" => match args.get(0) {
+            Some(Value::String(p)) => Ok(Value::String(fs::read_to_string(p).map_err(|e| e.to_string())?)),
+            _ => Err("read_file()".to_string()),
+        },
+        "write_file" => {
+            if let (Some(Value::String(p)), Some(Value::String(c))) = (args.get(0), args.get(1)) {
+                fs::write(p, c).map_err(|e| e.to_string())?;
+                Ok(Value::Null)
+            } else { Err("write_file()".to_string()) }
+        }
+        "file_exists" => match args.get(0) {
+            Some(Value::String(p)) => Ok(Value::Bool(Path::new(p).exists())),
+            _ => Err("file_exists()".to_string()),
+        },
+        "list_dir" => {
+            if let Some(Value::String(p)) = args.get(0) {
+                let mut files = Vec::new();
+                if let Ok(entries) = fs::read_dir(p) {
+                    for entry in entries.flatten() {
+                        if let Ok(name) = entry.file_name().into_string() { files.push(Value::String(name)); }
+                    }
+                }
+                let idx = heap.alloc(HeapObject::Array(files));
+                return Ok(Value::Array(idx));
+            }
+            Err("list_dir()".to_string())
+        }
+        "mkdir" => match args.get(0) {
+            Some(Value::String(p)) => { let _ = fs::create_dir_all(p); Ok(Value::Null) }
+            _ => Err("mkdir()".to_string()),
+        },
+        "random" => {
+            let max = match args.get(0) { Some(Value::Number(n)) => *n as u64, _ => 100 };
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos() as u64;
+            Ok(Value::Number(((nanos * 1103515245 + 12345) % max) as f64))
+        }
+        "clear_screen" => {
+            print!("\x1b[2J\x1b[1;1H");
+            use std::io::Write; std::io::stdout().flush().unwrap();
+            Ok(Value::Null)
+        }
+        "print_str" => {
+            if let Some(v) = args.get(0) { print!("{}", v.to_string()); use std::io::Write; std::io::stdout().flush().unwrap(); }
+            Ok(Value::Null)
+        }
+        "print_char" => {
+            if let Some(Value::Number(n)) = args.get(0) { print!("{}", *n as u8 as char); use std::io::Write; std::io::stdout().flush().unwrap(); }
+            Ok(Value::Null)
+        }
+        "read_line" => {
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).unwrap();
+            Ok(Value::String(input.trim().to_string()))
+        }
+        "input" => {
+            let prompt = match args.get(0) { Some(Value::String(s)) => s.clone(), _ => String::new() };
+            print!("{}", prompt);
+            use std::io::Write; std::io::stdout().flush().unwrap();
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).unwrap();
+            Ok(Value::String(input.trim().to_string()))
+        }
+        "tcp_listen" => {
+            if let Some(Value::Number(port)) = args.get(0) {
+                let l = TcpListener::bind(format!("127.0.0.1:{}", port)).map_err(|e| e.to_string())?;
+                let mut c = get_counter().lock().unwrap();
+                let id = *c; *c += 1;
+                get_servers().lock().unwrap().insert(id, l);
+                return Ok(Value::Number(id as f64));
+            }
+            Err("tcp_listen()".to_string())
+        }
+        "tcp_accept" => {
+            if let Some(Value::Number(id)) = args.get(0) {
+                let servers = get_servers().lock().unwrap();
+                if let Some(l) = servers.get(&(*id as usize)) {
+                    match l.accept() {
+                        Ok((s, _)) => {
+                            let mut c = get_counter().lock().unwrap();
+                            let cid = *c; *c += 1;
+                            get_clients().lock().unwrap().insert(cid, s);
+                            return Ok(Value::Number(cid as f64));
+                        }
+                        Err(e) => return Err(format!("accept: {}", e)),
+                    }
+                }
+            }
+            Err("tcp_accept()".to_string())
+        }
+        "tcp_read" => {
+            if let Some(Value::Number(id)) = args.get(0) {
+                let max = match args.get(1) { Some(Value::Number(n)) => *n as usize, _ => 4096 };
+                let mut clients = get_clients().lock().unwrap();
+                if let Some(s) = clients.get_mut(&(*id as usize)) {
+                    let mut buf = vec![0; max];
+                    match s.read(&mut buf) {
+                        Ok(n) => { buf.truncate(n); return Ok(Value::String(String::from_utf8_lossy(&buf).to_string())); }
+                        Err(e) => return Err(format!("read: {}", e)),
+                    }
+                }
+            }
+            Err("tcp_read()".to_string())
+        }
+        "tcp_write" => {
+            if let (Some(Value::Number(id)), Some(Value::String(msg))) = (args.get(0), args.get(1)) {
+                let mut clients = get_clients().lock().unwrap();
+                if let Some(s) = clients.get_mut(&(*id as usize)) {
+                    return s.write_all(msg.as_bytes()).map(|_| Value::Null).map_err(|e| e.to_string());
+                }
+            }
+            Err("tcp_write()".to_string())
+        }
+        "tcp_close" => {
+            if let Some(Value::Number(id)) = args.get(0) {
+                get_clients().lock().unwrap().remove(&(*id as usize));
+                get_servers().lock().unwrap().remove(&(*id as usize));
+                return Ok(Value::Null);
+            }
+            Err("tcp_close()".to_string())
+        }
+        "http_get" => {
+            if let Some(Value::String(url)) = args.get(0) {
+                match ureq::get(url).call() {
+                    Ok(resp) => return resp.into_string().map(Value::String).map_err(|e| e.to_string()),
+                    Err(e) => return Err(format!("http_get: {}", e)),
+                }
+            }
+            Err("http_get()".to_string())
+        }
+        _ => Err(format!("Unknown builtin: {}", name)),
+    }
+}
+
 // ===================== VM =====================
 
 struct Handler {
@@ -717,322 +1005,65 @@ impl VM {
         }
     }
 
-    fn get_roots(&self) -> Vec<Value> {
-        let mut r = Vec::new();
-        r.extend(self.stack.clone());
-        r.extend(self.locals.clone());
-        r
-    }
-
-    fn builtin(&mut self, name: &str, args: Vec<Value>) -> Result<Value, String> {
-        match name {
-            "str" => Ok(Value::String(args.get(0).unwrap_or(&Value::Null).to_string())),
-            "num" => match args.get(0).unwrap_or(&Value::Null) {
-                Value::Number(n) => Ok(Value::Number(*n)),
-                Value::String(s) => s.parse::<f64>().map(Value::Number).map_err(|_| format!("num() cannot parse {:?}", s)),
-                _ => Err("num() expects string or number".to_string()),
-            },
-            "type" => {
-                let t = match args.get(0).unwrap_or(&Value::Null) {
-                    Value::Number(_) => "number", Value::String(_) => "string", Value::Bool(_) => "bool",
-                    Value::Array(_) => "array", Value::Map(_) => "map", Value::Struct(..) => "struct",
-                    Value::Function { .. } => "function", Value::Closure(..) => "function", Value::Null => "null",
-                };
-                Ok(Value::String(t.to_string()))
-            }
-            "len" => match args.get(0).unwrap_or(&Value::Null) {
-                Value::String(s) => Ok(Value::Number(s.len() as f64)),
-                Value::Array(idx) => if let HeapObject::Array(arr) = self.heap.get(*idx) { Ok(Value::Number(arr.len() as f64)) } else { Err("Not array".to_string()) },
-                Value::Map(idx) => if let HeapObject::Map(map) = self.heap.get(*idx) { Ok(Value::Number(map.len() as f64)) } else { Err("Not map".to_string()) },
-                _ => Err("len() expects collection".to_string()),
-            },
-            "push" => {
-                let v = args.get(1).cloned().unwrap_or(Value::Null);
-                if let Some(Value::Array(idx)) = args.get(0) {
-                    if let HeapObject::Array(arr) = self.heap.get_mut(*idx) { arr.push(v); }
-                }
-                Ok(Value::Null)
-            }
-            "pop" => {
-                if let Some(Value::Array(idx)) = args.get(0) {
-                    if let HeapObject::Array(arr) = self.heap.get_mut(*idx) { return Ok(arr.pop().unwrap_or(Value::Null)); }
-                }
-                Err("pop() expects array".to_string())
-            }
-            "keys" => {
-                if let Some(Value::Map(idx)) = args.get(0) {
-                    let mut keys = Vec::new();
-                    if let HeapObject::Map(map) = self.heap.get(*idx) {
-                        for k in map.keys() {
-                            let kv = match k {
-                                MapKey::String(s) => Value::String(s.clone()),
-                                MapKey::Number(n) => Value::Number(f64::from_bits(*n as u64)),
-                                MapKey::Bool(b) => Value::Bool(*b),
-                            };
-                            keys.push(kv);
-                        }
-                    }
-                    let out = self.heap.alloc(HeapObject::Array(keys));
-                    return Ok(Value::Array(out));
-                }
-                Err("keys() expects map".to_string())
-            }
-            "split" => {
-                if let (Some(Value::String(sv)), Some(Value::String(sep))) = (args.get(0), args.get(1)) {
-                    if sep.is_empty() { return Err("split() sep empty".to_string()); }
-                    let parts: Vec<Value> = sv.split(sep.as_str()).map(|p| Value::String(p.to_string())).collect();
-                    let idx = self.heap.alloc(HeapObject::Array(parts));
-                    Ok(Value::Array(idx))
-                } else { Err("split() expects two strings".to_string()) }
-            }
-            "join" => {
-                if let (Some(Value::Array(idx)), Some(Value::String(sep))) = (args.get(0), args.get(1)) {
-                    if let HeapObject::Array(arr) = self.heap.get(*idx) {
-                        let mut parts = Vec::new();
-                        for item in arr.iter() {
-                            if let Value::String(s) = item { parts.push(s.clone()); }
-                            else { return Err("join() expects strings".to_string()); }
-                        }
-                        return Ok(Value::String(parts.join(sep)));
-                    }
-                }
-                Err("join() expects array and string".to_string())
-            }
-            "upper" => match args.get(0) { Some(Value::String(s)) => Ok(Value::String(s.to_uppercase())), _ => Err("upper()".to_string()) },
-            "lower" => match args.get(0) { Some(Value::String(s)) => Ok(Value::String(s.to_lowercase())), _ => Err("lower()".to_string()) },
-            "trim" => match args.get(0) { Some(Value::String(s)) => Ok(Value::String(s.trim().to_string())), _ => Err("trim()".to_string()) },
-            "replace" => {
-                if let (Some(Value::String(sv)), Some(Value::String(ov)), Some(Value::String(nv))) = (args.get(0), args.get(1), args.get(2)) {
-                    Ok(Value::String(sv.replace(ov, nv)))
-                } else { Err("replace()".to_string()) }
-            }
-            "contains" => match (args.get(0), args.get(1)) {
-                (Some(Value::String(s)), Some(Value::String(sub))) => Ok(Value::Bool(s.contains(sub))),
-                (Some(Value::Array(idx)), Some(v)) => {
-                    if let HeapObject::Array(arr) = self.heap.get(*idx) {
-                        Ok(Value::Bool(arr.iter().any(|x| x.to_string() == v.to_string())))
-                    } else { Err("Not array".to_string()) }
-                }
-                (Some(Value::Map(idx)), Some(v)) => {
-                    if let Ok(k) = MapKey::from_value(v) {
-                        if let HeapObject::Map(map) = self.heap.get(*idx) { return Ok(Value::Bool(map.contains_key(&k))); }
-                    }
-                    Ok(Value::Bool(false))
-                }
-                _ => Err("contains()".to_string()),
-            },
-            "str_eq" => {
-                let a = args.get(0).cloned().unwrap_or(Value::Null);
-                let b = args.get(1).cloned().unwrap_or(Value::Null);
-                Ok(Value::Number(if a.to_string() == b.to_string() { 1.0 } else { 0.0 }))
-            }
-            "char_code" => match args.get(0) {
-                Some(Value::String(s)) if s.as_bytes().len() == 1 => Ok(Value::Number(s.as_bytes()[0] as f64)),
-                _ => Err("char_code()".to_string()),
-            },
-            "byte_at" => {
-                if let (Some(Value::String(sv)), Some(Value::Number(n))) = (args.get(0), args.get(1)) {
-                    let idx = *n as isize; let bytes = sv.as_bytes();
-                    if idx < 0 || idx as usize >= bytes.len() { return Ok(Value::Number(-1.0)); }
-                    return Ok(Value::Number(bytes[idx as usize] as f64));
-                }
-                Err("byte_at()".to_string())
-            }
-            "byte_substr" => {
-                if let (Some(Value::String(sv)), Some(Value::Number(a)), Some(Value::Number(b))) = (args.get(0), args.get(1), args.get(2)) {
-                    let bytes = sv.as_bytes();
-                    let mut start = if *a < 0.0 { 0 } else { *a as usize };
-                    let mut end = if *b < 0.0 { 0 } else { *b as usize };
-                    if start > bytes.len() { start = bytes.len(); }
-                    if end > bytes.len() { end = bytes.len(); }
-                    if start > end { start = end; }
-                    return Ok(Value::String(String::from_utf8_lossy(&bytes[start..end]).to_string()));
-                }
-                Err("byte_substr()".to_string())
-            }
-            "bytes_to_str" => {
-                if let Some(Value::Array(idx)) = args.get(0) {
-                    if let HeapObject::Array(arr) = self.heap.get(*idx) {
-                        let mut buf = Vec::with_capacity(arr.len());
-                        for v in arr.iter() {
-                            if let Value::Number(n) = v {
-                                let b = *n as i64;
-                                if !(0..=255).contains(&b) { return Err(format!("byte out of range: {}", b)); }
-                                buf.push(b as u8);
-                            } else { return Err("bytes_to_str()".to_string()); }
-                        }
-                        return Ok(Value::String(String::from_utf8_lossy(&buf).to_string()));
-                    }
-                }
-                Err("bytes_to_str()".to_string())
-            }
-            "read_file" => match args.get(0) {
-                Some(Value::String(p)) => Ok(Value::String(fs::read_to_string(p).map_err(|e| e.to_string())?)),
-                _ => Err("read_file()".to_string()),
-            },
-            "write_file" => {
-                if let (Some(Value::String(p)), Some(Value::String(c))) = (args.get(0), args.get(1)) {
-                    fs::write(p, c).map_err(|e| e.to_string())?;
-                    Ok(Value::Null)
-                } else { Err("write_file()".to_string()) }
-            }
-            "file_exists" => match args.get(0) {
-                Some(Value::String(p)) => Ok(Value::Bool(Path::new(p).exists())),
-                _ => Err("file_exists()".to_string()),
-            },
-            "list_dir" => {
-                if let Some(Value::String(p)) = args.get(0) {
-                    let mut files = Vec::new();
-                    if let Ok(entries) = fs::read_dir(p) {
-                        for entry in entries.flatten() {
-                            if let Ok(name) = entry.file_name().into_string() { files.push(Value::String(name)); }
-                        }
-                    }
-                    let idx = self.heap.alloc(HeapObject::Array(files));
-                    return Ok(Value::Array(idx));
-                }
-                Err("list_dir()".to_string())
-            }
-            "mkdir" => match args.get(0) {
-                Some(Value::String(p)) => { let _ = fs::create_dir_all(p); Ok(Value::Null) }
-                _ => Err("mkdir()".to_string()),
-            },
-            "random" => {
-                let max = match args.get(0) { Some(Value::Number(n)) => *n as u64, _ => 100 };
-                use std::time::{SystemTime, UNIX_EPOCH};
-                let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos() as u64;
-                Ok(Value::Number(((nanos * 1103515245 + 12345) % max) as f64))
-            }
-            "clear_screen" => {
-                print!("\x1b[2J\x1b[1;1H");
-                use std::io::Write; std::io::stdout().flush().unwrap();
-                Ok(Value::Null)
-            }
-            "print_str" => {
-                if let Some(v) = args.get(0) { print!("{}", v.to_string()); use std::io::Write; std::io::stdout().flush().unwrap(); }
-                Ok(Value::Null)
-            }
-            "print_char" => {
-                if let Some(Value::Number(n)) = args.get(0) { print!("{}", *n as u8 as char); use std::io::Write; std::io::stdout().flush().unwrap(); }
-                Ok(Value::Null)
-            }
-            "read_line" => {
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input).unwrap();
-                Ok(Value::String(input.trim().to_string()))
-            }
-            "input" => {
-                let prompt = match args.get(0) { Some(Value::String(s)) => s.clone(), _ => String::new() };
-                print!("{}", prompt);
-                use std::io::Write; std::io::stdout().flush().unwrap();
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input).unwrap();
-                Ok(Value::String(input.trim().to_string()))
-            }
-            "tcp_listen" => {
-                if let Some(Value::Number(port)) = args.get(0) {
-                    let l = TcpListener::bind(format!("127.0.0.1:{}", port)).map_err(|e| e.to_string())?;
-                    let mut c = get_counter().lock().unwrap();
-                    let id = *c; *c += 1;
-                    get_servers().lock().unwrap().insert(id, l);
-                    return Ok(Value::Number(id as f64));
-                }
-                Err("tcp_listen()".to_string())
-            }
-            "tcp_accept" => {
-                if let Some(Value::Number(id)) = args.get(0) {
-                    let servers = get_servers().lock().unwrap();
-                    if let Some(l) = servers.get(&(*id as usize)) {
-                        match l.accept() {
-                            Ok((s, _)) => {
-                                let mut c = get_counter().lock().unwrap();
-                                let cid = *c; *c += 1;
-                                get_clients().lock().unwrap().insert(cid, s);
-                                return Ok(Value::Number(cid as f64));
-                            }
-                            Err(e) => return Err(format!("accept: {}", e)),
-                        }
-                    }
-                }
-                Err("tcp_accept()".to_string())
-            }
-            "tcp_read" => {
-                if let Some(Value::Number(id)) = args.get(0) {
-                    let max = match args.get(1) { Some(Value::Number(n)) => *n as usize, _ => 4096 };
-                    let mut clients = get_clients().lock().unwrap();
-                    if let Some(s) = clients.get_mut(&(*id as usize)) {
-                        let mut buf = vec![0; max];
-                        match s.read(&mut buf) {
-                            Ok(n) => { buf.truncate(n); return Ok(Value::String(String::from_utf8_lossy(&buf).to_string())); }
-                            Err(e) => return Err(format!("read: {}", e)),
-                        }
-                    }
-                }
-                Err("tcp_read()".to_string())
-            }
-            "tcp_write" => {
-                if let (Some(Value::Number(id)), Some(Value::String(msg))) = (args.get(0), args.get(1)) {
-                    let mut clients = get_clients().lock().unwrap();
-                    if let Some(s) = clients.get_mut(&(*id as usize)) {
-                        return s.write_all(msg.as_bytes()).map(|_| Value::Null).map_err(|e| e.to_string());
-                    }
-                }
-                Err("tcp_write()".to_string())
-            }
-            "tcp_close" => {
-                if let Some(Value::Number(id)) = args.get(0) {
-                    get_clients().lock().unwrap().remove(&(*id as usize));
-                    get_servers().lock().unwrap().remove(&(*id as usize));
-                    return Ok(Value::Null);
-                }
-                Err("tcp_close()".to_string())
-            }
-            "http_get" => {
-                if let Some(Value::String(url)) = args.get(0) {
-                    match ureq::get(url).call() {
-                        Ok(resp) => return resp.into_string().map(Value::String).map_err(|e| e.to_string()),
-                        Err(e) => return Err(format!("http_get: {}", e)),
-                    }
-                }
-                Err("http_get()".to_string())
-            }
-            _ => Err(format!("Unknown builtin: {}", name)),
-        }
-    }
-
     pub fn run(&mut self, code: Vec<OpCode>, funcs: Vec<Vec<OpCode>>) -> Result<(), String> {
         self.functions = funcs;
-        let mut ip = 0;
-        let mut current_code = code.clone();
+
+        // STEP 3: destructure `self` into disjoint &mut fields.
+        // LLVM's noalias model now knows stack / locals / heap etc. don't alias.
+        let Self {
+            stack,
+            locals,
+            frames,
+            functions,
+            functions_by_name,
+            call_stack,
+            closure_stack,
+            handlers,
+            heap,
+        } = self;
+
+        let mut ip: usize = 0;
+        let mut current_code: Vec<OpCode> = code.clone();
+        // NOTE: `code` intentionally stays owned & alive — `Throw` needs it for
+        // `current_code = code.clone()`. (Earlier draft had a bug moving it into
+        // an unused `_original_code`.)
 
         while ip < current_code.len() {
-            match &current_code[ip] {
-                OpCode::Constant(v) => self.stack.push(v.clone()),
+            // STEP 2: skip the bounds check. Guarded by the `while` condition above.
+            let op = unsafe { current_code.get_unchecked(ip) };
+            match op {
+                OpCode::Constant(v) => stack.push(v.clone()),
                 OpCode::Add => {
-                    let b = self.stack.pop().unwrap_or(Value::Null);
-                    let a = self.stack.pop().unwrap_or(Value::Null);
+                    let b = stack.pop().unwrap_or(Value::Null);
+                    let a = stack.pop().unwrap_or(Value::Null);
                     match (a, b) {
-                        (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Number(x + y)),
-                        (Value::String(x), Value::String(y)) => self.stack.push(Value::String(format!("{}{}", x, y))),
-                        _ => self.stack.push(Value::Null),
+                        (Value::Number(x), Value::Number(y)) => stack.push(Value::Number(x + y)),
+                        (Value::String(x), Value::String(y)) => stack.push(Value::String(format!("{}{}", x, y))),
+                        _ => stack.push(Value::Null),
                     }
                 }
-                OpCode::Sub => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); if let (Value::Number(x), Value::Number(y)) = (a, b) { self.stack.push(Value::Number(x - y)); } }
-                OpCode::Mul => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); if let (Value::Number(x), Value::Number(y)) = (a, b) { self.stack.push(Value::Number(x * y)); } }
-                OpCode::Div => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); if let (Value::Number(x), Value::Number(y)) = (a, b) { self.stack.push(Value::Number(x / y)); } }
-                OpCode::Eq => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); self.stack.push(Value::Bool(a.to_string() == b.to_string())); }
-                OpCode::NotEq => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); self.stack.push(Value::Bool(a.to_string() != b.to_string())); }
-                OpCode::Lt => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x < y)), _ => self.stack.push(Value::Bool(a.to_string() < b.to_string())) } }
-                OpCode::Gt => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x > y)), _ => self.stack.push(Value::Bool(a.to_string() > b.to_string())) } }
-                OpCode::LtEq => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x <= y)), _ => self.stack.push(Value::Bool(a.to_string() <= b.to_string())) } }
-                OpCode::GtEq => { let b = self.stack.pop().unwrap_or(Value::Null); let a = self.stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => self.stack.push(Value::Bool(x >= y)), _ => self.stack.push(Value::Bool(a.to_string() >= b.to_string())) } }
-                OpCode::Negate => { let v = self.stack.pop().unwrap_or(Value::Null); if let Value::Number(n) = v { self.stack.push(Value::Number(-n)); } else { self.stack.push(Value::Null); } }
-                OpCode::Not => { let v = self.stack.pop().unwrap_or(Value::Null); if let Value::Bool(b) = v { self.stack.push(Value::Bool(!b)); } else { self.stack.push(Value::Null); } }
-                OpCode::Print => { let val = self.stack.pop().unwrap_or(Value::Null); println!("{}", val.to_string()); }
+                OpCode::Sub => { let b = stack.pop().unwrap_or(Value::Null); let a = stack.pop().unwrap_or(Value::Null); if let (Value::Number(x), Value::Number(y)) = (a, b) { stack.push(Value::Number(x - y)); } }
+                OpCode::Mul => { let b = stack.pop().unwrap_or(Value::Null); let a = stack.pop().unwrap_or(Value::Null); if let (Value::Number(x), Value::Number(y)) = (a, b) { stack.push(Value::Number(x * y)); } }
+                OpCode::Div => { let b = stack.pop().unwrap_or(Value::Null); let a = stack.pop().unwrap_or(Value::Null); if let (Value::Number(x), Value::Number(y)) = (a, b) { stack.push(Value::Number(x / y)); } }
+                OpCode::Eq => { let b = stack.pop().unwrap_or(Value::Null); let a = stack.pop().unwrap_or(Value::Null); stack.push(Value::Bool(a.to_string() == b.to_string())); }
+                OpCode::NotEq => { let b = stack.pop().unwrap_or(Value::Null); let a = stack.pop().unwrap_or(Value::Null); stack.push(Value::Bool(a.to_string() != b.to_string())); }
+                OpCode::Lt => { let b = stack.pop().unwrap_or(Value::Null); let a = stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => stack.push(Value::Bool(x < y)), _ => stack.push(Value::Bool(a.to_string() < b.to_string())) } }
+                OpCode::Gt => { let b = stack.pop().unwrap_or(Value::Null); let a = stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => stack.push(Value::Bool(x > y)), _ => stack.push(Value::Bool(a.to_string() > b.to_string())) } }
+                OpCode::LtEq => { let b = stack.pop().unwrap_or(Value::Null); let a = stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => stack.push(Value::Bool(x <= y)), _ => stack.push(Value::Bool(a.to_string() <= b.to_string())) } }
+                OpCode::GtEq => { let b = stack.pop().unwrap_or(Value::Null); let a = stack.pop().unwrap_or(Value::Null); match (&a, &b) { (Value::Number(x), Value::Number(y)) => stack.push(Value::Bool(x >= y)), _ => stack.push(Value::Bool(a.to_string() >= b.to_string())) } }
+                OpCode::Negate => { let v = stack.pop().unwrap_or(Value::Null); if let Value::Number(n) = v { stack.push(Value::Number(-n)); } else { stack.push(Value::Null); } }
+                OpCode::Not => { let v = stack.pop().unwrap_or(Value::Null); if let Value::Bool(b) = v { stack.push(Value::Bool(!b)); } else { stack.push(Value::Null); } }
+                OpCode::Print => { let val = stack.pop().unwrap_or(Value::Null); println!("{}", val.to_string()); }
 
                 OpCode::BinLocals(op, a, b) => {
-                    let res = match (self.locals.get(*a as usize), self.locals.get(*b as usize)) {
-                        (Some(Value::Number(x)), Some(Value::Number(y))) => match op {
+                    let ai = *a as usize;
+                    let bi = *b as usize;
+                    debug_assert!(ai < locals.len());
+                    debug_assert!(bi < locals.len());
+                    let lv = unsafe { locals.get_unchecked(ai) };
+                    let rv = unsafe { locals.get_unchecked(bi) };
+                    let res = match (lv, rv) {
+                        (Value::Number(x), Value::Number(y)) => match op {
                             TokenType::Plus => Value::Number(x + y),
                             TokenType::Minus => Value::Number(x - y),
                             TokenType::Star => Value::Number(x * y),
@@ -1045,7 +1076,7 @@ impl VM {
                             TokenType::GtEq => Value::Bool(x >= y),
                             _ => Value::Null,
                         },
-                        (Some(Value::String(x)), Some(Value::String(y))) => match op {
+                        (Value::String(x), Value::String(y)) => match op {
                             TokenType::Plus => Value::String(format!("{}{}", x, y)),
                             TokenType::EqEq => Value::Bool(x == y),
                             TokenType::NotEq => Value::Bool(x != y),
@@ -1055,173 +1086,204 @@ impl VM {
                             TokenType::GtEq => Value::Bool(x >= y),
                             _ => Value::Null,
                         },
-                        (Some(Value::Bool(x)), Some(Value::Bool(y))) => match op {
+                        (Value::Bool(x), Value::Bool(y)) => match op {
                             TokenType::EqEq => Value::Bool(x == y),
                             TokenType::NotEq => Value::Bool(x != y),
                             _ => Value::Null,
                         },
                         _ => Value::Null,
                     };
-                    self.stack.push(res);
+                    stack.push(res);
                 }
                 OpCode::IncLocal(slot, delta) => {
-                    if let Some(Value::Number(n)) = self.locals.get_mut(*slot as usize) { *n += delta; }
+                    let s = *slot as usize;
+                    debug_assert!(s < locals.len());
+                    unsafe {
+                        if let Value::Number(n) = locals.get_unchecked_mut(s) { *n += delta; }
+                    }
                 }
                 OpCode::AddLocalConst(a, k, b) => {
-                    let res = match self.locals.get(*a as usize) {
-                        Some(Value::Number(n)) => Value::Number(n + k),
-                        _ => Value::Null,
+                    let ai = *a as usize;
+                    let bi = *b as usize;
+                    debug_assert!(ai < locals.len());
+                    let res = unsafe {
+                        match locals.get_unchecked(ai) {
+                            Value::Number(n) => Value::Number(n + k),
+                            _ => Value::Null,
+                        }
                     };
-                    let b = *b as usize;
-                    if b >= self.locals.len() { self.locals.resize(b + 1, Value::Null); }
-                    self.locals[b] = res;
+                    if bi >= locals.len() { locals.resize(bi + 1, Value::Null); }
+                    locals[bi] = res;
                 }
 
                 OpCode::JumpIfLocalCmpFalse(op, a, b, target) => {
-                    let cond = match (self.locals.get(*a as usize), self.locals.get(*b as usize)) {
-                        (Some(Value::Number(x)), Some(Value::Number(y))) => match op {
-                            TokenType::Lt => x < y, TokenType::LtEq => x <= y,
-                            TokenType::Gt => x > y, TokenType::GtEq => x >= y,
-                            TokenType::EqEq => x == y, TokenType::NotEq => x != y,
+                    let ai = *a as usize;
+                    let bi = *b as usize;
+                    debug_assert!(ai < locals.len());
+                    debug_assert!(bi < locals.len());
+                    let cond = unsafe {
+                        match (locals.get_unchecked(ai), locals.get_unchecked(bi)) {
+                            (Value::Number(x), Value::Number(y)) => match op {
+                                TokenType::Lt => x < y, TokenType::LtEq => x <= y,
+                                TokenType::Gt => x > y, TokenType::GtEq => x >= y,
+                                TokenType::EqEq => x == y, TokenType::NotEq => x != y,
+                                _ => false,
+                            },
+                            (Value::String(x), Value::String(y)) => match op {
+                                TokenType::EqEq => x == y, TokenType::NotEq => x != y,
+                                TokenType::Lt => x < y, TokenType::Gt => x > y,
+                                TokenType::LtEq => x <= y, TokenType::GtEq => x >= y,
+                                _ => false,
+                            },
+                            (Value::Bool(x), Value::Bool(y)) => match op {
+                                TokenType::EqEq => x == y, TokenType::NotEq => x != y,
+                                _ => false,
+                            },
                             _ => false,
-                        },
-                        (Some(Value::String(x)), Some(Value::String(y))) => match op {
-                            TokenType::EqEq => x == y, TokenType::NotEq => x != y,
-                            TokenType::Lt => x < y, TokenType::Gt => x > y,
-                            TokenType::LtEq => x <= y, TokenType::GtEq => x >= y,
-                            _ => false,
-                        },
-                        (Some(Value::Bool(x)), Some(Value::Bool(y))) => match op {
-                            TokenType::EqEq => x == y, TokenType::NotEq => x != y,
-                            _ => false,
-                        },
-                        _ => false,
+                        }
                     };
                     if !cond { ip = *target; continue; }
                 }
                 OpCode::AddLocalMulLocal(dst, a, b) => {
-                    let prod = match (self.locals.get(*a as usize), self.locals.get(*b as usize)) {
-                        (Some(Value::Number(x)), Some(Value::Number(y))) => Value::Number(x * y),
-                        _ => Value::Null,
+                    let ai = *a as usize;
+                    let bi = *b as usize;
+                    let di = *dst as usize;
+                    debug_assert!(ai < locals.len());
+                    debug_assert!(bi < locals.len());
+                    debug_assert!(di < locals.len());
+                    let prod = unsafe {
+                        match (locals.get_unchecked(ai), locals.get_unchecked(bi)) {
+                            (Value::Number(x), Value::Number(y)) => Value::Number(x * y),
+                            _ => Value::Null,
+                        }
                     };
-                    let dst = *dst as usize;
-                    let sum = match (self.locals.get(dst), &prod) {
-                        (Some(Value::Number(x)), Value::Number(y)) => Value::Number(x + y),
-                        (Some(Value::String(x)), Value::String(y)) => Value::String(format!("{}{}", x, y)),
-                        _ => Value::Null,
+                    let sum = {
+                        let cur = unsafe { locals.get_unchecked(di) };
+                        match (cur, &prod) {
+                            (Value::Number(x), Value::Number(y)) => Value::Number(x + y),
+                            (Value::String(x), Value::String(y)) => Value::String(format!("{}{}", x, y)),
+                            _ => Value::Null,
+                        }
                     };
-                    if dst >= self.locals.len() { self.locals.resize(dst + 1, Value::Null); }
-                    self.locals[dst] = sum;
+                    locals[di] = sum;
                 }
                 OpCode::IncLocalJump(slot, delta, target) => {
-                    if let Some(Value::Number(n)) = self.locals.get_mut(*slot as usize) { *n += delta; }
+                    let s = *slot as usize;
+                    debug_assert!(s < locals.len());
+                    unsafe {
+                        if let Value::Number(n) = locals.get_unchecked_mut(s) { *n += delta; }
+                    }
                     ip = *target;
                     continue;
                 }
                 OpCode::JumpIfLocalConstCmpFalse(op, slot, k, target) => {
-                    let cond = match self.locals.get(*slot as usize) {
-                        Some(Value::Number(x)) => match op {
-                            TokenType::Lt => *x < *k, TokenType::LtEq => *x <= *k,
-                            TokenType::Gt => *x > *k, TokenType::GtEq => *x >= *k,
-                            TokenType::EqEq => *x == *k, TokenType::NotEq => *x != *k,
-                            _ => false,
-                        },
-                        Some(Value::String(x)) => {
-                            let rhs = format!("{}", k);
-                            match op {
-                                TokenType::EqEq => *x == rhs, TokenType::NotEq => *x != rhs,
-                                TokenType::Lt => *x < rhs, TokenType::Gt => *x > rhs,
-                                TokenType::LtEq => *x <= rhs, TokenType::GtEq => *x >= rhs,
+                    let s = *slot as usize;
+                    debug_assert!(s < locals.len());
+                    let cond = unsafe {
+                        match locals.get_unchecked(s) {
+                            Value::Number(x) => match op {
+                                TokenType::Lt => *x < *k, TokenType::LtEq => *x <= *k,
+                                TokenType::Gt => *x > *k, TokenType::GtEq => *x >= *k,
+                                TokenType::EqEq => *x == *k, TokenType::NotEq => *x != *k,
                                 _ => false,
+                            },
+                            Value::String(x) => {
+                                let rhs = format!("{}", k);
+                                match op {
+                                    TokenType::EqEq => *x == rhs, TokenType::NotEq => *x != rhs,
+                                    TokenType::Lt => *x < rhs, TokenType::Gt => *x > rhs,
+                                    TokenType::LtEq => *x <= rhs, TokenType::GtEq => *x >= rhs,
+                                    _ => false,
+                                }
                             }
+                            _ => false,
                         }
-                        _ => false,
                     };
                     if !cond { ip = *target; continue; }
                 }
 
                 OpCode::Interpolate(n) => {
-                    if *n == 0 { self.stack.push(Value::String(String::new())); }
+                    if *n == 0 { stack.push(Value::String(String::new())); }
                     else {
                         let mut parts = Vec::new();
-                        for _ in 0..*n { parts.push(self.stack.pop().unwrap_or(Value::Null)); }
+                        for _ in 0..*n { parts.push(stack.pop().unwrap_or(Value::Null)); }
                         parts.reverse();
                         let s: String = parts.iter().map(|v| v.to_string()).collect();
-                        self.stack.push(Value::String(s));
+                        stack.push(Value::String(s));
                     }
                 }
 
                 OpCode::MakeClosure(func_idx, captured_slots, np, nl) => {
                     let captured: Vec<Value> = captured_slots.iter().map(|&s| {
-                        if s == usize::MAX { Value::Null } else { self.locals.get(s).cloned().unwrap_or(Value::Null) }
+                        if s == usize::MAX { Value::Null } else { locals.get(s).cloned().unwrap_or(Value::Null) }
                     }).collect();
-                    self.stack.push(Value::Closure(*func_idx, *np, *nl, Rc::new(RefCell::new(captured))));
+                    stack.push(Value::Closure(*func_idx, *np, *nl, Rc::new(RefCell::new(captured))));
                 }
 
                 OpCode::DefineFunction(name, idx, slot) => {
-                    if self.locals.len() <= *slot { self.locals.resize(*slot + 1, Value::Null); }
-                    self.locals[*slot] = Value::Number(*idx as f64);
-                    self.functions_by_name.insert(name.clone(), *idx);
+                    if locals.len() <= *slot { locals.resize(*slot + 1, Value::Null); }
+                    locals[*slot] = Value::Number(*idx as f64);
+                    functions_by_name.insert(name.clone(), *idx);
                 }
 
                 OpCode::Builtin(name, arg_count) => {
-                    if self.heap.needs_gc() {
-                        let roots = self.get_roots();
-                        self.heap.collect_garbage(&roots);
+                    if heap.needs_gc() {
+                        let roots = compute_roots(stack, locals);
+                        heap.collect_garbage(&roots);
                     }
-                    let mut args = Vec::new();
-                    for _ in 0..*arg_count { args.push(self.stack.pop().unwrap_or(Value::Null)); }
-                    let res = self.builtin(name, args)?;
-                    self.stack.push(res);
+                    let mut args = Vec::with_capacity(*arg_count);
+                    for _ in 0..*arg_count { args.push(stack.pop().unwrap_or(Value::Null)); }
+                    let res = builtin_impl(heap, name, args)?;
+                    stack.push(res);
                 }
 
-                OpCode::Dup => { let top = self.stack.last().cloned().unwrap_or(Value::Null); self.stack.push(top); }
-                OpCode::Pop => { self.stack.pop(); }
+                OpCode::Dup => { let top = stack.last().cloned().unwrap_or(Value::Null); stack.push(top); }
+                OpCode::Pop => { stack.pop(); }
                 OpCode::SetLocal(slot) => {
-                    let val = self.stack.pop().unwrap_or(Value::Null);
-                    if self.locals.len() <= *slot { self.locals.resize(*slot + 1, Value::Null); }
-                    self.locals[*slot] = val;
+                    let val = stack.pop().unwrap_or(Value::Null);
+                    if locals.len() <= *slot { locals.resize(*slot + 1, Value::Null); }
+                    locals[*slot] = val;
                 }
                 OpCode::GetLocal(slot) => {
-                    let v = self.locals.get(*slot).cloned().unwrap_or(Value::Null);
-                    self.stack.push(v);
+                    let v = locals.get(*slot).cloned().unwrap_or(Value::Null);
+                    stack.push(v);
                 }
                 OpCode::Jump(target) => { ip = *target; continue; }
                 OpCode::JumpIfFalse(target) => {
-                    let val = self.stack.pop().unwrap_or(Value::Null);
+                    let val = stack.pop().unwrap_or(Value::Null);
                     if !val.is_truthy() { ip = *target; continue; }
                 }
 
                 OpCode::MethodCall(method, arg_count) => {
                     let mut args = Vec::new();
-                    for _ in 0..*arg_count { args.push(self.stack.pop().unwrap_or(Value::Null)); }
-                    let target = self.stack.pop().unwrap_or(Value::Null);
+                    for _ in 0..*arg_count { args.push(stack.pop().unwrap_or(Value::Null)); }
+                    let target = stack.pop().unwrap_or(Value::Null);
                     if let Value::Struct(idx) = target {
-                        let struct_name = if let HeapObject::Struct(n, _) = self.heap.get(idx) { n.clone() } else { "".to_string() };
+                        let struct_name = if let HeapObject::Struct(n, _) = heap.get(idx) { n.clone() } else { "".to_string() };
                         let full_name = format!("{}.{}", struct_name, method);
-                        if let Some(&func_idx) = self.functions_by_name.get(&full_name) {
-                            self.call_stack.push((ip, self.handlers.len(), current_code.clone()));
-                            self.closure_stack.push(None);
-                            self.frames.push(std::mem::replace(&mut self.locals, Vec::new()));
+                        if let Some(&func_idx) = functions_by_name.get(&full_name) {
+                            call_stack.push((ip, handlers.len(), current_code.clone()));
+                            closure_stack.push(None);
+                            frames.push(std::mem::replace(locals, Vec::new()));
                             let mut final_args = vec![Value::Struct(idx)];
                             final_args.extend(args);
-                            self.locals = final_args;
-                            current_code = self.functions[func_idx].clone();
+                            *locals = final_args;
+                            current_code = functions[func_idx].clone();
                             ip = 0; continue;
                         }
                     }
                 }
 
                 OpCode::Call(arg_count) => {
-                    let func_idx_val = self.stack.pop().unwrap_or(Value::Null);
+                    let func_idx_val = stack.pop().unwrap_or(Value::Null);
                     match func_idx_val {
                         Value::Number(idx) => {
-                            self.call_stack.push((ip, self.handlers.len(), current_code.clone()));
-                            self.closure_stack.push(None);
-                            self.frames.push(std::mem::replace(&mut self.locals, Vec::new()));
-                            let new_locals: Vec<Value> = (0..*arg_count).map(|_| self.stack.pop().unwrap_or(Value::Null)).collect();
-                            self.locals = new_locals;
-                            current_code = self.functions[idx as usize].clone();
+                            call_stack.push((ip, handlers.len(), current_code.clone()));
+                            closure_stack.push(None);
+                            frames.push(std::mem::replace(locals, Vec::new()));
+                            let new_locals: Vec<Value> = (0..*arg_count).map(|_| stack.pop().unwrap_or(Value::Null)).collect();
+                            *locals = new_locals;
+                            current_code = functions[idx as usize].clone();
                             ip = 0; continue;
                         }
                         Value::Closure(idx, np, nl, captured) => {
@@ -1229,60 +1291,60 @@ impl VM {
                                 let b = captured.borrow();
                                 b.iter().cloned().collect()
                             };
-                            self.call_stack.push((ip, self.handlers.len(), current_code.clone()));
-                            self.closure_stack.push(Some((captured.clone(), np, nl)));
-                            self.frames.push(std::mem::replace(&mut self.locals, Vec::new()));
+                            call_stack.push((ip, handlers.len(), current_code.clone()));
+                            closure_stack.push(Some((captured.clone(), np, nl)));
+                            frames.push(std::mem::replace(locals, Vec::new()));
                             let mut new_locals: Vec<Value> = Vec::with_capacity(np + nl + cap_snapshot.len());
-                            for _ in 0..*arg_count { new_locals.push(self.stack.pop().unwrap_or(Value::Null)); }
+                            for _ in 0..*arg_count { new_locals.push(stack.pop().unwrap_or(Value::Null)); }
                             new_locals.resize(np + nl, Value::Null);
                             new_locals.extend(cap_snapshot);
-                            self.locals = new_locals;
-                            current_code = self.functions[idx].clone();
+                            *locals = new_locals;
+                            current_code = functions[idx].clone();
                             ip = 0; continue;
                         }
                         _ => {}
                     }
                 }
                 OpCode::Return => {
-                    let ret_val = self.stack.pop().unwrap_or(Value::Null);
-                    if let Some((ret_ip, handlers_len, caller_code)) = self.call_stack.pop() {
-                        self.handlers.truncate(handlers_len);
-                        if let Some(Some((cap, np, nl))) = self.closure_stack.pop() {
+                    let ret_val = stack.pop().unwrap_or(Value::Null);
+                    if let Some((ret_ip, handlers_len, caller_code)) = call_stack.pop() {
+                        handlers.truncate(handlers_len);
+                        if let Some(Some((cap, np, nl))) = closure_stack.pop() {
                             let base = np + nl;
                             let mut b = cap.borrow_mut();
                             for i in 0..b.len() {
-                                if base + i < self.locals.len() {
-                                    b[i] = self.locals[base + i].clone();
+                                if base + i < locals.len() {
+                                    b[i] = locals[base + i].clone();
                                 }
                             }
                         }
-                        self.locals = self.frames.pop().unwrap_or_default();
-                        self.stack.push(ret_val);
+                        *locals = frames.pop().unwrap_or_default();
+                        stack.push(ret_val);
                         current_code = caller_code;
                         ip = ret_ip;
                     } else { break; }
                 }
 
                 OpCode::TryStart(handler_ip) => {
-                    self.handlers.push(Handler {
+                    handlers.push(Handler {
                         ip: *handler_ip,
-                        locals: self.locals.clone(),
-                        frames: self.frames.clone(),
-                        call_stack: self.call_stack.clone(),
-                        closure_stack: self.closure_stack.clone(),
-                        stack: self.stack.clone(),
+                        locals: locals.clone(),
+                        frames: frames.clone(),
+                        call_stack: call_stack.clone(),
+                        closure_stack: closure_stack.clone(),
+                        stack: stack.clone(),
                     });
                 }
-                OpCode::TryEnd => { self.handlers.pop(); }
+                OpCode::TryEnd => { handlers.pop(); }
                 OpCode::Throw => {
-                    let exc = self.stack.pop().unwrap_or(Value::Null);
-                    if let Some(h) = self.handlers.pop() {
-                        self.locals = h.locals;
-                        self.frames = h.frames;
-                        self.call_stack = h.call_stack;
-                        self.closure_stack = h.closure_stack;
-                        self.stack = h.stack;
-                        self.stack.push(exc);
+                    let exc = stack.pop().unwrap_or(Value::Null);
+                    if let Some(h) = handlers.pop() {
+                        *locals = h.locals;
+                        *frames = h.frames;
+                        *call_stack = h.call_stack;
+                        *closure_stack = h.closure_stack;
+                        *stack = h.stack;
+                        stack.push(exc);
                         current_code = code.clone();
                         ip = h.ip; continue;
                     } else {
@@ -1291,108 +1353,108 @@ impl VM {
                 }
 
                 OpCode::Array(size) => {
-                    if self.heap.needs_gc() {
-                        let roots = self.get_roots();
-                        self.heap.collect_garbage(&roots);
+                    if heap.needs_gc() {
+                        let roots = compute_roots(stack, locals);
+                        heap.collect_garbage(&roots);
                     }
-                    let mut elements = Vec::new();
-                    for _ in 0..*size { elements.push(self.stack.pop().unwrap_or(Value::Null)); }
+                    let mut elements = Vec::with_capacity(*size);
+                    for _ in 0..*size { elements.push(stack.pop().unwrap_or(Value::Null)); }
                     elements.reverse();
-                    let idx = self.heap.alloc(HeapObject::Array(elements));
-                    self.stack.push(Value::Array(idx));
+                    let idx = heap.alloc(HeapObject::Array(elements));
+                    stack.push(Value::Array(idx));
                 }
                 OpCode::Map(size) => {
-                    if self.heap.needs_gc() {
-                        let roots = self.get_roots();
-                        self.heap.collect_garbage(&roots);
+                    if heap.needs_gc() {
+                        let roots = compute_roots(stack, locals);
+                        heap.collect_garbage(&roots);
                     }
                     let mut map = HashMap::new();
                     for _ in 0..*size {
-                        let v = self.stack.pop().unwrap_or(Value::Null);
-                        let k = self.stack.pop().unwrap_or(Value::Null);
+                        let v = stack.pop().unwrap_or(Value::Null);
+                        let k = stack.pop().unwrap_or(Value::Null);
                         if let Ok(key) = MapKey::from_value(&k) { map.insert(key, v); }
                     }
-                    let idx = self.heap.alloc(HeapObject::Map(map));
-                    self.stack.push(Value::Map(idx));
+                    let idx = heap.alloc(HeapObject::Map(map));
+                    stack.push(Value::Map(idx));
                 }
                 OpCode::Struct(name, fields) => {
-                    if self.heap.needs_gc() {
-                        let roots = self.get_roots();
-                        self.heap.collect_garbage(&roots);
+                    if heap.needs_gc() {
+                        let roots = compute_roots(stack, locals);
+                        heap.collect_garbage(&roots);
                     }
                     let mut map = HashMap::new();
                     for f in fields.iter().rev() {
-                        let v = self.stack.pop().unwrap_or(Value::Null);
+                        let v = stack.pop().unwrap_or(Value::Null);
                         map.insert(f.clone(), v);
                     }
-                    let idx = self.heap.alloc(HeapObject::Struct(name.clone(), map));
-                    self.stack.push(Value::Struct(idx));
+                    let idx = heap.alloc(HeapObject::Struct(name.clone(), map));
+                    stack.push(Value::Struct(idx));
                 }
                 OpCode::FieldAccess(field) => {
-                    let target = self.stack.pop().unwrap_or(Value::Null);
+                    let target = stack.pop().unwrap_or(Value::Null);
                     if let Value::Struct(idx) = target {
-                        if let HeapObject::Struct(_, map) = self.heap.get(idx) {
-                            if let Some(v) = map.get(field) { self.stack.push(v.clone()); } else { self.stack.push(Value::Null); }
+                        if let HeapObject::Struct(_, map) = heap.get(idx) {
+                            if let Some(v) = map.get(field) { stack.push(v.clone()); } else { stack.push(Value::Null); }
                         }
-                    } else { self.stack.push(Value::Null); }
+                    } else { stack.push(Value::Null); }
                 }
                 OpCode::FieldSet(field) => {
-                    let value = self.stack.pop().unwrap_or(Value::Null);
-                    let target = self.stack.pop().unwrap_or(Value::Null);
+                    let value = stack.pop().unwrap_or(Value::Null);
+                    let target = stack.pop().unwrap_or(Value::Null);
                     if let Value::Struct(idx) = target {
-                        if let HeapObject::Struct(_, map) = self.heap.get_mut(idx) {
+                        if let HeapObject::Struct(_, map) = heap.get_mut(idx) {
                             map.insert(field.clone(), value);
                         }
                     }
                 }
                 OpCode::Index => {
-                    let idx_val = self.stack.pop().unwrap_or(Value::Null);
-                    let target = self.stack.pop().unwrap_or(Value::Null);
+                    let idx_val = stack.pop().unwrap_or(Value::Null);
+                    let target = stack.pop().unwrap_or(Value::Null);
                     match (target, idx_val) {
                         (Value::Array(arr_idx), Value::Number(n)) => {
-                            if let HeapObject::Array(arr) = self.heap.get(arr_idx) {
+                            if let HeapObject::Array(arr) = heap.get(arr_idx) {
                                 let i = n as usize;
-                                if i < arr.len() { self.stack.push(arr[i].clone()); } else { self.stack.push(Value::Null); }
-                            } else { self.stack.push(Value::Null); }
+                                if i < arr.len() { stack.push(arr[i].clone()); } else { stack.push(Value::Null); }
+                            } else { stack.push(Value::Null); }
                         }
                         (Value::Map(map_idx), k) => {
                             if let Ok(key) = MapKey::from_value(&k) {
-                                if let HeapObject::Map(map) = self.heap.get(map_idx) {
-                                    if let Some(v) = map.get(&key) { self.stack.push(v.clone()); } else { self.stack.push(Value::Null); }
+                                if let HeapObject::Map(map) = heap.get(map_idx) {
+                                    if let Some(v) = map.get(&key) { stack.push(v.clone()); } else { stack.push(Value::Null); }
                                 }
-                            } else { self.stack.push(Value::Null); }
+                            } else { stack.push(Value::Null); }
                         }
                         (Value::Struct(idx), k) => {
                             if let Value::String(key) = k {
-                                if let HeapObject::Struct(_, map) = self.heap.get(idx) {
-                                    if let Some(v) = map.get(&key) { self.stack.push(v.clone()); } else { self.stack.push(Value::Null); }
+                                if let HeapObject::Struct(_, map) = heap.get(idx) {
+                                    if let Some(v) = map.get(&key) { stack.push(v.clone()); } else { stack.push(Value::Null); }
                                 }
-                            } else { self.stack.push(Value::Null); }
+                            } else { stack.push(Value::Null); }
                         }
-                        _ => self.stack.push(Value::Null),
+                        _ => stack.push(Value::Null),
                     }
                 }
                 OpCode::IndexSet => {
-                    let value = self.stack.pop().unwrap_or(Value::Null);
-                    let idx_val = self.stack.pop().unwrap_or(Value::Null);
-                    let target = self.stack.pop().unwrap_or(Value::Null);
+                    let value = stack.pop().unwrap_or(Value::Null);
+                    let idx_val = stack.pop().unwrap_or(Value::Null);
+                    let target = stack.pop().unwrap_or(Value::Null);
                     match (target, idx_val) {
                         (Value::Array(arr_idx), Value::Number(n)) => {
-                            if let HeapObject::Array(arr) = self.heap.get_mut(arr_idx) {
+                            if let HeapObject::Array(arr) = heap.get_mut(arr_idx) {
                                 let i = n as usize;
                                 if i < arr.len() { arr[i] = value; }
                             }
                         }
                         (Value::Map(map_idx), k) => {
                             if let Ok(key) = MapKey::from_value(&k) {
-                                if let HeapObject::Map(map) = self.heap.get_mut(map_idx) {
+                                if let HeapObject::Map(map) = heap.get_mut(map_idx) {
                                     map.insert(key, value);
                                 }
                             }
                         }
                         (Value::Struct(idx), k) => {
                             if let Value::String(key) = k {
-                                if let HeapObject::Struct(_, map) = self.heap.get_mut(idx) {
+                                if let HeapObject::Struct(_, map) = heap.get_mut(idx) {
                                     map.insert(key, value);
                                 }
                             }

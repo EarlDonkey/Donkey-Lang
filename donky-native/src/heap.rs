@@ -17,6 +17,12 @@ impl MapKey {
     }
 }
 
+/// `repr(C, u8)`:
+///   - C: field layout matches C structs (stable, predictable field offsets).
+///   - u8: discriminant is exactly 1 byte at offset 0.
+/// Gives LLVM a stable "tag at offset 0, u8-sized" contract so pattern matches
+/// compile down to a single-byte load + jump table instead of guessing.
+#[repr(C, u8)]
 #[derive(Debug, Clone)]
 pub enum Value {
     Number(f64),
@@ -27,7 +33,6 @@ pub enum Value {
         body: Box<Stmt>,
         captured: Option<Rc<RefCell<Vec<HashMap<String, Value>>>>>,
     },
-    /// (func_idx, num_params, num_locals, captured_upvalues)
     Closure(usize, usize, usize, Rc<RefCell<Vec<Value>>>),
     Array(usize),
     Map(usize),
