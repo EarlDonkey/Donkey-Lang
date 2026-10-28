@@ -223,7 +223,7 @@ pub struct Compiler {
 
 impl Compiler {
     pub fn new() -> Self {
-        Compiler {
+        let mut c = Compiler {
             code: Vec::new(), locals: HashMap::new(), next_local: 0, num_params: 0,
             upvalues: Rc::new(RefCell::new(UpvalueState::default())),
             captured_names: Rc::new(RefCell::new(Vec::new())),
@@ -233,7 +233,9 @@ impl Compiler {
             string_map: Rc::new(RefCell::new(HashMap::new())),
             globals: Rc::new(RefCell::new(HashMap::new())),
             is_main: true,
-        }
+        };
+        c.globals.borrow_mut().insert("args".to_string(), 0);
+        c
     }
 
     fn intern(&self, s: String) -> u32 {
@@ -256,9 +258,6 @@ impl Compiler {
         self.globals.borrow().get(name).copied()
     }
 
-    /// Pre-pass: allocate global slots for every top-level function so that
-    /// forward references (A calls B where B is defined later) and recursion
-    /// work from inside any function body.
     fn prepass_globals(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             match stmt {
@@ -421,16 +420,10 @@ impl Compiler {
                 self.compile_expr(obj); self.compile_expr(val);
                 self.code.push(PendingOp::Ready(OpCode::FieldSet(field)));
             }
-            Stmt::IndexSet(name, idx_expr, val_expr) => {
-                if let Some(&slot) = self.locals.get(&name) {
-                    self.code.push(PendingOp::Ready(OpCode::GetLocal(slot)));
-                } else {
-                    let uv: Option<usize> = self.upvalues.borrow().map.get(&name).copied();
-                    if let Some(idx) = uv { self.code.push(PendingOp::GetUpvalue(idx)); }
-                    else if let Some(gslot) = self.lookup_global(&name) { self.code.push(PendingOp::Ready(OpCode::GetGlobal(gslot))); }
-                    else { self.code.push(PendingOp::Ready(OpCode::ConstantNull)); }
-                }
-                self.compile_expr(idx_expr); self.compile_expr(val_expr);
+            Stmt::IndexSet(target, idx_expr, val_expr) => {
+                self.compile_expr(*target);
+                self.compile_expr(*idx_expr);
+                self.compile_expr(*val_expr);
                 self.code.push(PendingOp::Ready(OpCode::IndexSet));
             }
             Stmt::ExprStmt(expr) => { self.compile_expr(expr); self.code.push(PendingOp::Ready(OpCode::Pop)); }
@@ -519,7 +512,6 @@ impl Compiler {
                 let (idx, _caps, _np, _nl) = self.compile_function(final_params, body, false);
                 let slot = self.next_local; self.locals.insert(name.clone(), slot); self.next_local += 1;
                 if self.is_main {
-                    // prepass_globals already allocated this slot for top-level fns
                     let gslot = self.lookup_global(&name).unwrap_or_else(|| self.alloc_global(&name));
                     self.code.push(PendingOp::Ready(OpCode::DefineFunctionGlobal(name, idx, slot, gslot)));
                 } else {
@@ -1010,11 +1002,18 @@ impl VM {
         }
     }
 
-    pub fn run(&mut self, code: Vec<OpCode>, funcs: Vec<Vec<OpCode>>, string_pool: Vec<String>) -> Result<(), String> {
+    pub fn run(&mut self, code: Vec<OpCode>, funcs: Vec<Vec<OpCode>>, string_pool: Vec<String>, script_args: Vec<String>) -> Result<(), String> {
         self.functions = funcs;
         self.string_pool_heap = string_pool.into_iter()
             .map(|s| self.heap.alloc(HeapObject::String(s)))
             .collect();
+
+        let args_array: Vec<Value> = script_args.into_iter().map(|s| {
+            let idx = self.heap.alloc(HeapObject::String(s));
+            Value::string(idx)
+        }).collect();
+        let args_idx = self.heap.alloc(HeapObject::Array(args_array));
+        self.globals = vec![Value::array(args_idx)];
 
         let Self {
             stack, locals, globals, frames, functions, functions_by_name,
@@ -1024,11 +1023,29 @@ impl VM {
         let mut ip: usize = 0;
         let mut current_code: Vec<OpCode> = code.clone();
 
+        // FIX: Include frames, handlers, closure_stack, and string_pool_heap in roots
         macro_rules! roots { () => {{
-            let mut r = Vec::with_capacity(stack.len() + locals.len() + globals.len());
+            let mut r = Vec::new();
             r.extend_from_slice(stack);
             r.extend_from_slice(locals);
             r.extend_from_slice(globals);
+            for frame in frames.iter() {
+                r.extend_from_slice(frame);
+            }
+            for h in handlers.iter() {
+                r.extend_from_slice(&h.stack);
+                r.extend_from_slice(&h.locals);
+                for hf in h.frames.iter() { r.extend_from_slice(hf); }
+            }
+            for c in closure_stack.iter() {
+                if let Some((cap, _, _)) = c {
+                    let vals: Vec<Value> = cap.borrow().clone();
+                    for v in vals { r.push(v); }
+                }
+            }
+            for &idx in string_pool_heap.iter() {
+                r.push(Value::string(idx));
+            }
             r
         }}}
 

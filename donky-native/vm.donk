@@ -1,0 +1,117 @@
+// vm.donk — Self-Hosted Donky Virtual Machine
+// Usage: .\target\release\donky-native.exe vm vm.donk <file.donk>
+
+import "compiler.donk";
+
+fn eval_op(op, a, b) {
+    if op == "Plus" { return a + b; }
+    if op == "Minus" { return a - b; }
+    if op == "Star" { return a * b; }
+    if op == "Slash" { return a / b; }
+    if op == "EqEq" { return a == b; }
+    if op == "Lt" { return a < b; }
+    if op == "Gt" { return a > b; }
+    if op == "LtEq" { return a <= b; }
+    if op == "GtEq" { return a >= b; }
+    throw "Unknown operator: " + op;
+}
+
+fn run_bytecode(bytecode) {
+    let stack = [];
+    let locals = {};
+    
+    let ip = 0;
+    let len_bc = len(bytecode);
+
+    while ip < len_bc {
+        let instruction = bytecode[ip];
+        
+        // Split instruction into opcode and argument
+        let parts = split(instruction, " ");
+        let op = parts[0];
+        let arg = "";
+        if len(parts) > 1 {
+            // If there are multiple spaces or parts, rejoin them
+            let arg_parts = [];
+            let i = 1;
+            while i < len(parts) {
+                push(arg_parts, parts[i]);
+                i = i + 1;
+            }
+            arg = join(arg_parts, " ");
+        }
+
+        // --- Execution Loop ---
+        if op == "PushNumber" {
+            push(stack, num(arg));
+        }
+        else if op == "PushString" {
+            push(stack, arg);
+        }
+        else if op == "PushBool" {
+            push(stack, arg == "true");
+        }
+        else if op == "Pop" {
+            pop(stack);
+        }
+        else if op == "SetLocal" {
+            locals[arg] = pop(stack);
+        }
+        else if op == "GetLocal" {
+            if contains(locals, arg) {
+                push(stack, locals[arg]);
+            } else {
+                throw "Undefined variable: " + arg;
+            }
+        }
+        else if op == "BinOp" {
+            let b = pop(stack);
+            let a = pop(stack);
+            push(stack, eval_op(arg, a, b));
+        }
+        else if op == "Print" {
+            print(pop(stack));
+        }
+        else if op == "Jump" {
+            ip = num(arg);
+            continue; // Skip the ip increment below
+        }
+        else if op == "JumpIfFalse" {
+            let cond = pop(stack);
+            if !cond {
+                ip = num(arg);
+                continue; // Skip the ip increment below
+            }
+        }
+        else if op == "Halt" {
+            break;
+        }
+        else {
+            if !contains(instruction, "// Skipped") {
+                print("[VM Warning] Unknown opcode: " + instruction);
+            }
+        }
+        
+        ip = ip + 1;
+    }
+}
+
+fn main() {
+    if len(args) < 1 {
+        print("Usage: donky-native vm vm.donk <file.donk>");
+        return;
+    }
+    
+    let source = read_file(args[0]);
+    let tokens = tokenize(source);
+    let ast = parse(tokens);
+    
+    // Compile AST to Bytecode
+    let bytecode = compile(ast);
+    
+    print("=== Running Bytecode ===");
+    run_bytecode(bytecode);
+    print("=== Done ===");
+}
+
+main();

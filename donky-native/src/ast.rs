@@ -13,7 +13,7 @@ pub enum Expr {
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Let(String, Expr), Assign(String, Expr), IndexSet(String, Expr, Expr), FieldSet(Expr, String, Expr),
+    Let(String, Expr), Assign(String, Expr), IndexSet(Box<Expr>, Box<Expr>, Box<Expr>), FieldSet(Expr, String, Expr),
     Print(Expr), ExprStmt(Expr), Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>), While(Expr, Box<Stmt>),
     For(String, Expr, Box<Stmt>),

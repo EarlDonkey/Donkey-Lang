@@ -43,7 +43,7 @@ fn main() {
         let compiler = vm::Compiler::new();
         let (code, funcs, string_pool) = compiler.compile(ast);
         let mut machine = vm::VM::new();
-        if let Err(e) = machine.run(code, funcs, string_pool) { eprintln!("Runtime Error: {}", e); }
+        if let Err(e) = machine.run(code, funcs, string_pool, script_args) { eprintln!("Runtime Error: {}", e); }
     } else {
         let mut interp = interpreter::Interpreter::new(script_args);
         if let Err(e) = interp.interpret(ast) { eprintln!("Runtime Error: {}", e); }

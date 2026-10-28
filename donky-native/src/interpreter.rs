@@ -112,10 +112,10 @@ impl Interpreter {
             }
             Stmt::Let(name, expr) => { let v = self.evaluate(expr)?; self.env.define(name, v); Ok(ControlFlow::Normal) }
             Stmt::Assign(name, expr) => { let v = self.evaluate(expr)?; self.env.assign(&name, v)?; Ok(ControlFlow::Normal) }
-            Stmt::IndexSet(name, idx_expr, val_expr) => {
-                let index = self.evaluate(idx_expr)?;
-                let value = self.evaluate(val_expr)?;
-                let target = self.env.get(&name)?;
+            Stmt::IndexSet(target_expr, idx_expr, val_expr) => {
+                let index = self.evaluate(*idx_expr)?;
+                let value = self.evaluate(*val_expr)?;
+                let target = self.evaluate(*target_expr)?;
                 match target.kind() {
                     ValueKind::Array(idx) => {
                         if let Some(n) = index.as_number() {

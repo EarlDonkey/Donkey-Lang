@@ -59,12 +59,8 @@ impl Parser {
                 Ok(Stmt::Assign(name, Expr::Binary(Box::new(lhs), bin_op, Box::new(value))))
             }
             Expr::Index(obj, idx) => {
-                if let Expr::Ident(name) = *obj {
-                    let lhs = Expr::Index(Box::new(Expr::Ident(name.clone())), idx.clone());
-                    Ok(Stmt::IndexSet(name, *idx, Expr::Binary(Box::new(lhs), bin_op, Box::new(value))))
-                } else {
-                    Err("Compound assignment only supported on simple identifiers".to_string())
-                }
+                let lhs = Expr::Index(obj.clone(), idx.clone());
+                Ok(Stmt::IndexSet(obj, idx, Box::new(Expr::Binary(Box::new(lhs), bin_op, Box::new(value)))))
             }
             Expr::FieldAccess(obj, field) => {
                 let lhs = Expr::FieldAccess(obj.clone(), field.clone());
@@ -281,8 +277,7 @@ impl Parser {
             self.consume(TokenType::Semi, "Expected ';'")?;
             match expr {
                 Expr::Index(target, index) => {
-                    if let Expr::Ident(name) = *target { return Ok(Stmt::IndexSet(name, *index, value)); }
-                    return Err("Invalid array assignment target".to_string());
+                    return Ok(Stmt::IndexSet(target, index, Box::new(value)));
                 }
                 Expr::FieldAccess(obj, field) => { return Ok(Stmt::FieldSet(*obj, field, value)); }
                 _ => return Err("Invalid assignment target".to_string()),
