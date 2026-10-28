@@ -1,0 +1,12 @@
+{
+  "locked": {
+    "format": {
+      "url": "https://raw.githubusercontent.com/EarlDonkey/Donkey-Lang/main/lib/format.donk"
+    },
+    "strings": {
+      "url": "https://raw.githubusercontent.com/EarlDonkey/Donkey-Lang/main/lib/strings.donk"
+    }
+  },
+  "name": "donky-lang-demo",
+  "version": "1.0.0"
+}

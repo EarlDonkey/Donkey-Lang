@@ -1,0 +1,10 @@
+import "lib/string.donk";
+
+print(starts_with("hello", "he"));
+print(ends_with("hello", "lo"));
+print(index_of_str("hello", "ll"));
+print(repeat("ab", 3));
+print(reverse_str("hello"));
+print(pad_left("7", 3, "0"));
+print(is_numeric("123"));
+print(is_numeric("12a"));

@@ -26,7 +26,7 @@ pub enum OpCode {
     ConstantBool(bool),
     ConstantNull,
     StringConst(u32),
-    Add, Sub, Mul, Div, Eq, NotEq, Lt, Gt, LtEq, GtEq,
+    Add, Sub, Mul, Div, Mod, Eq, NotEq, Lt, Gt, LtEq, GtEq,
     Negate, Not,
     Print, Jump(usize), JumpIfFalse(usize), JumpIfTrue(usize), GetLocal(usize), SetLocal(usize),
     DefineFunction(String, usize, usize),
@@ -56,6 +56,7 @@ fn bin_op_of(op: &OpCode) -> Option<TokenType> {
     match op {
         OpCode::Add => Some(TokenType::Plus), OpCode::Sub => Some(TokenType::Minus),
         OpCode::Mul => Some(TokenType::Star), OpCode::Div => Some(TokenType::Slash),
+        OpCode::Mod => Some(TokenType::Percent),
         OpCode::Eq => Some(TokenType::EqEq), OpCode::NotEq => Some(TokenType::NotEq),
         OpCode::Lt => Some(TokenType::Lt), OpCode::Gt => Some(TokenType::Gt),
         OpCode::LtEq => Some(TokenType::LtEq), OpCode::GtEq => Some(TokenType::GtEq),
@@ -263,12 +264,15 @@ impl Compiler {
             match stmt {
                 Stmt::Function(name, _, _) => { self.alloc_global(name); }
                 Stmt::Import(path) => {
-                    if let Ok(content) = fs::read_to_string(path) {
-                        if let Ok(tokens) = Lexer::new(&content).tokenize() {
-                            if let Ok(ast) = Parser::new(tokens).parse() {
-                                self.prepass_globals(&ast);
-                            }
-                        }
+                    match fs::read_to_string(path) {
+                        Ok(content) => match Lexer::new(&content).tokenize() {
+                            Ok(tokens) => match Parser::new(tokens).parse() {
+                                Ok(ast) => self.prepass_globals(&ast),
+                                Err(e) => eprintln!("[import] parse error in {}: {}", path, e),
+                            },
+                            Err(e) => eprintln!("[import] lex error in {}: {}", path, e),
+                        },
+                        Err(e) => eprintln!("[import] read failed for {}: {}", path, e),
                     }
                 }
                 _ => {}
@@ -376,11 +380,20 @@ impl Compiler {
         match stmt {
             Stmt::Asm(_) => {}
             Stmt::Import(path) => {
-                let content = match fs::read_to_string(&path) { Ok(c) => c, Err(_) => return };
+                let content = match fs::read_to_string(&path) {
+                    Ok(c) => c,
+                    Err(e) => { eprintln!("[import] read failed for {}: {}", path, e); return; }
+                };
                 let mut lex = Lexer::new(&content);
-                let tokens = match lex.tokenize() { Ok(t) => t, Err(_) => return };
+                let tokens = match lex.tokenize() {
+                    Ok(t) => t,
+                    Err(e) => { eprintln!("[import] lex error in {}: {}", path, e); return; }
+                };
                 let mut parser = Parser::new(tokens);
-                let imported = match parser.parse() { Ok(a) => a, Err(_) => return };
+                let imported = match parser.parse() {
+                    Ok(a) => a,
+                    Err(e) => { eprintln!("[import] parse error in {}: {}", path, e); return; }
+                };
                 self.prepass_globals(&imported);
                 for s in imported { self.compile_stmt(s); }
             }
@@ -659,6 +672,7 @@ impl Compiler {
                 let oc = match op {
                     TokenType::Plus => OpCode::Add, TokenType::Minus => OpCode::Sub,
                     TokenType::Star => OpCode::Mul, TokenType::Slash => OpCode::Div,
+                    TokenType::Percent => OpCode::Mod,
                     TokenType::EqEq => OpCode::Eq, TokenType::NotEq => OpCode::NotEq,
                     TokenType::Lt => OpCode::Lt, TokenType::Gt => OpCode::Gt,
                     TokenType::LtEq => OpCode::LtEq, TokenType::GtEq => OpCode::GtEq,
@@ -1074,6 +1088,7 @@ impl VM {
                 OpCode::Sub => { let b = stack.pop().unwrap_or(Value::null()); let a = stack.pop().unwrap_or(Value::null()); if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) { stack.push(Value::number(x - y)); } else { stack.push(Value::null()); } }
                 OpCode::Mul => { let b = stack.pop().unwrap_or(Value::null()); let a = stack.pop().unwrap_or(Value::null()); if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) { stack.push(Value::number(x * y)); } else { stack.push(Value::null()); } }
                 OpCode::Div => { let b = stack.pop().unwrap_or(Value::null()); let a = stack.pop().unwrap_or(Value::null()); if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) { stack.push(Value::number(x / y)); } else { stack.push(Value::null()); } }
+                OpCode::Mod => { let b = stack.pop().unwrap_or(Value::null()); let a = stack.pop().unwrap_or(Value::null()); match (a.as_number(), b.as_number()) { (Some(x), Some(y)) if y != 0.0 => stack.push(Value::number(x % y)), _ => stack.push(Value::null()) } }
                 OpCode::Eq => { let b = stack.pop().unwrap_or(Value::null()); let a = stack.pop().unwrap_or(Value::null()); let eq = if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) { x == y } else if a.is_string() && b.is_string() { heap.get_string(a.payload()) == heap.get_string(b.payload()) } else if a.is_bool() && b.is_bool() { a.as_bool() == b.as_bool() } else { false }; stack.push(Value::bool(eq)); }
                 OpCode::NotEq => { let b = stack.pop().unwrap_or(Value::null()); let a = stack.pop().unwrap_or(Value::null()); let ne = if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) { x != y } else if a.is_string() && b.is_string() { heap.get_string(a.payload()) != heap.get_string(b.payload()) } else if a.is_bool() && b.is_bool() { a.as_bool() != b.as_bool() } else { true }; stack.push(Value::bool(ne)); }
                 OpCode::Lt => { let b = stack.pop().unwrap_or(Value::null()); let a = stack.pop().unwrap_or(Value::null()); let r = if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) { x < y } else if a.is_string() && b.is_string() { heap.get_string(a.payload()) < heap.get_string(b.payload()) } else { false }; stack.push(Value::bool(r)); }
@@ -1091,6 +1106,7 @@ impl VM {
                         match op {
                             TokenType::Plus => Value::number(x + y), TokenType::Minus => Value::number(x - y),
                             TokenType::Star => Value::number(x * y), TokenType::Slash => Value::number(x / y),
+                            TokenType::Percent => Value::number(x % y),
                             TokenType::EqEq => Value::bool(x == y), TokenType::NotEq => Value::bool(x != y),
                             TokenType::Lt => Value::bool(x < y), TokenType::Gt => Value::bool(x > y),
                             TokenType::LtEq => Value::bool(x <= y), TokenType::GtEq => Value::bool(x >= y),

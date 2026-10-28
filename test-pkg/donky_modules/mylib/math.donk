@@ -1,0 +1,85 @@
+// lib/math.donk — math helpers
+
+fn abs(n) {
+    if n < 0 { return -n; }
+    return n;
+}
+
+fn min(a, b) { if a < b { return a; } return b; }
+fn max(a, b) { if a > b { return a; } return b; }
+
+fn floor(n) {
+    let t = n - (n % 1);
+    if n < 0 && n % 1 != 0 { t = t - 1; }
+    return t;
+}
+
+fn ceil(n) {
+    let t = n - (n % 1);
+    if n > 0 && n % 1 != 0 { t = t + 1; }
+    return t;
+}
+
+fn round(n) {
+    if n >= 0 { return floor(n + 0.5); }
+    return -floor(-n + 0.5);
+}
+
+fn sqrt(n) {
+    if n < 0 { throw "sqrt of negative: " + str(n); }
+    if n == 0 { return 0; }
+    let x = n;
+    let i = 0;
+    while i < 20 {
+        x = (x + n / x) / 2;
+        i = i + 1;
+    }
+    return x;
+}
+
+fn pow(base, exp) {
+    if exp == 0 { return 1; }
+    if exp < 0 { return 1 / pow(base, -exp); }
+    // integer exponent fast path
+    if exp - (exp % 1) == exp {
+        let r = 1;
+        let i = 0;
+        while i < exp {
+            r = r * base;
+            i = i + 1;
+        }
+        return r;
+    }
+    throw "pow with non-integer exponent not supported";
+}
+
+fn sign(n) {
+    if n < 0 { return -1; }
+    if n > 0 { return 1; }
+    return 0;
+}
+
+fn clamp(n, lo, hi) {
+    if n < lo { return lo; }
+    if n > hi { return hi; }
+    return n;
+}
+
+fn gcd(a, b) {
+    let x = abs(a);
+    let y = abs(b);
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    return x;
+}
+
+fn lcm(a, b) {
+    if a == 0 || b == 0 { return 0; }
+    return abs(a * b) / gcd(a, b);
+}
+
+fn pi() { return 3.141592653589793; }
+fn e()  { return 2.718281828459045; }

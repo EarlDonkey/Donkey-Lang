@@ -1,0 +1,3 @@
+import "donky_modules/strings.donk";
+import "donky_modules/format.donk";
+print("imports work");

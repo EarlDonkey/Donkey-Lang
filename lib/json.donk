@@ -1,156 +1,174 @@
-// lib/json.donk — pure-Donky recursive descent JSON parser.
-//
-// Works entirely in byte positions to stay O(n). Every peek is byte_at(),
-// which is a native O(1) builtin. Structural characters in JSON are all
-// ASCII (", {, }, [, ], :, ,, digits), so byte positions never split a
-// multi-byte UTF-8 codepoint at the structural level. Text content of
-// strings is accumulated as raw bytes and re-encoded with bytes_to_str,
-// which preserves UTF-8 correctly.
-//
-// No dependency on lib/strings.donk.
+// lib/json.donk — parse and stringify JSON
 
-fn json_new_state(src) -> map {
-    return { "src": src, "pos": 0, "len": len(src) };
+// Parser state is a 2-element array: [source_string, current_index]
+// This lets us mutate position from helper functions.
+
+fn json_peek(st) -> number {
+    let s = st[0];
+    let i = st[1];
+    if i >= len(s) { return -1; }
+    return byte_at(s, i);
 }
 
-fn json_peek(s) -> num {
-    return byte_at(s["src"], s["pos"]);
+fn json_advance(st) {
+    st[1] = st[1] + 1;
 }
 
-fn json_skip_ws(s) -> void {
-    while s["pos"] < s["len"] {
-        let b = byte_at(s["src"], s["pos"]);
-        // space, \n, \r, \t
-        if b == 32 || b == 10 || b == 13 || b == 9 {
-            s["pos"] = s["pos"] + 1;
+fn json_skip_ws(st) {
+    while true {
+        let c = json_peek(st);
+        if c == 32 || c == 9 || c == 10 || c == 13 {
+            json_advance(st);
         } else {
-            break;
+            return;
         }
     }
 }
 
-fn json_parse_string(s) -> str {
-    // Skip opening quote (byte 34)
-    s["pos"] = s["pos"] + 1;
-    let bytes = [];
-    while s["pos"] < s["len"] {
-        let b = byte_at(s["src"], s["pos"]);
-        if b == 34 { // closing "
-            s["pos"] = s["pos"] + 1;
-            return bytes_to_str(bytes);
+fn json_parse_string(st) -> string {
+    json_advance(st);   // skip opening "
+    let out = "";
+    while true {
+        let c = json_peek(st);
+        if c == 34 {    // closing "
+            json_advance(st);
+            return out;
         }
-        if b == 92 { // backslash
-            s["pos"] = s["pos"] + 1;
-            let e = byte_at(s["src"], s["pos"]);
-            if e == 110 { push(bytes, 10); }        // \n
-            else if e == 116 { push(bytes, 9); }    // \t
-            else if e == 114 { push(bytes, 13); }   // \r
-            else if e == 34 { push(bytes, 34); }    // \"
-            else if e == 92 { push(bytes, 92); }    // \\
-            else if e == 47 { push(bytes, 47); }    // \/
-            else { push(bytes, e); }                // fallback: pass through
-            s["pos"] = s["pos"] + 1;
+        if c == -1 { throw "json: unterminated string"; }
+        if c == 92 {    // backslash
+            json_advance(st);
+            let e = json_peek(st);
+            if e == 110 { out = out + "\n"; }       // n
+            else if e == 116 { out = out + "\t"; }  // t
+            else if e == 114 { out = out + "\r"; }  // r
+            else if e == 34 { out = out + "\""; }   // "
+            else if e == 92 { out = out + "\\"; }   // \
+            else if e == 47 { out = out + "/"; }    // /
+            else { throw "json: bad escape \\" + bytes_to_str([e]); }
+            json_advance(st);
         } else {
-            push(bytes, b);
-            s["pos"] = s["pos"] + 1;
+            out = out + bytes_to_str([c]);
+            json_advance(st);
         }
     }
-    throw "Unterminated string in JSON";
 }
 
-fn json_parse_number(s) -> num {
-    let start = s["pos"];
-    while s["pos"] < s["len"] {
-        let b = byte_at(s["src"], s["pos"]);
-        // digits 0-9, -, +, ., e, E
-        if (b >= 48 && b <= 57) || b == 45 || b == 43 || b == 46 || b == 101 || b == 69 {
-            s["pos"] = s["pos"] + 1;
+fn json_parse_number(st) -> number {
+    let start = st[1];
+    while true {
+        let c = json_peek(st);
+        if (c >= 48 && c <= 57) || c == 45 || c == 46 || c == 101 || c == 69 || c == 43 {
+            json_advance(st);
         } else {
-            break;
+            return num(byte_substr(st[0], start, st[1]));
         }
     }
-    let text = byte_substr(s["src"], start, s["pos"]);
-    return num(text);
 }
 
-fn json_parse_array(s) -> array {
-    s["pos"] = s["pos"] + 1; // skip [
-    let arr = [];
-    json_skip_ws(s);
-    if json_peek(s) == 93 { // ]
-        s["pos"] = s["pos"] + 1;
-        return arr;
+fn json_parse_object(st) {
+    json_advance(st);   // skip {
+    let m = {};
+    json_skip_ws(st);
+    if json_peek(st) == 125 {   // }
+        json_advance(st);
+        return m;
     }
     while true {
-        push(arr, json_parse_value(s));
-        json_skip_ws(s);
-        let b = json_peek(s);
-        s["pos"] = s["pos"] + 1;
-        if b == 93 { return arr; }       // ]
-        if b != 44 { throw "Expected , or ] in JSON array"; } // ,
+        json_skip_ws(st);
+        let k = json_parse_string(st);
+        json_skip_ws(st);
+        if json_peek(st) != 58 { throw "json: expected ':'"; }
+        json_advance(st);
+        let v = json_parse_value(st);
+        m[k] = v;
+        json_skip_ws(st);
+        let c = json_peek(st);
+        if c == 44 { json_advance(st); continue; }   // ,
+        if c == 125 { json_advance(st); return m; }  // }
+        throw "json: expected ',' or '}'";
     }
 }
 
-fn json_parse_object(s) -> map {
-    s["pos"] = s["pos"] + 1; // skip {
-    let obj = {};
-    json_skip_ws(s);
-    if json_peek(s) == 125 { // }
-        s["pos"] = s["pos"] + 1;
-        return obj;
+fn json_parse_array(st) {
+    json_advance(st);   // skip [
+    let a = [];
+    json_skip_ws(st);
+    if json_peek(st) == 93 {    // ]
+        json_advance(st);
+        return a;
     }
     while true {
-        json_skip_ws(s);
-        let key = json_parse_string(s);
-        json_skip_ws(s);
-        if json_peek(s) != 58 { throw "Expected : in JSON object"; } // :
-        s["pos"] = s["pos"] + 1;
-        let val = json_parse_value(s);
-        obj[key] = val;
-        json_skip_ws(s);
-        let b = json_peek(s);
-        s["pos"] = s["pos"] + 1;
-        if b == 125 { return obj; }      // }
-        if b != 44 { throw "Expected , or } in JSON object"; } // ,
+        let v = json_parse_value(st);
+        push(a, v);
+        json_skip_ws(st);
+        let c = json_peek(st);
+        if c == 44 { json_advance(st); continue; }   // ,
+        if c == 93 { json_advance(st); return a; }   // ]
+        throw "json: expected ',' or ']'";
     }
 }
 
-fn json_parse_value(s) -> any {
-    json_skip_ws(s);
-    if s["pos"] >= s["len"] { throw "Unexpected end of JSON"; }
-    let b = json_peek(s);
-
-    if b == 34 { return json_parse_string(s); }     // "
-    if b == 123 { return json_parse_object(s); }    // {
-    if b == 91 { return json_parse_array(s); }      // [
-
-    // true / false / null — check exact bytes before advancing
-    if b == 116 && s["pos"] + 4 <= s["len"]
-        && byte_substr(s["src"], s["pos"], s["pos"] + 4) == "true" {
-        s["pos"] = s["pos"] + 4;
-        return true;
-    }
-    if b == 102 && s["pos"] + 5 <= s["len"]
-        && byte_substr(s["src"], s["pos"], s["pos"] + 5) == "false" {
-        s["pos"] = s["pos"] + 5;
-        return false;
-    }
-    if b == 110 && s["pos"] + 4 <= s["len"]
-        && byte_substr(s["src"], s["pos"], s["pos"] + 4) == "null" {
-        s["pos"] = s["pos"] + 4;
-        return "";
-    }
-
-    if (b >= 48 && b <= 57) || b == 45 {  // digit or -
-        return json_parse_number(s);
-    }
-
-    throw "Unexpected character in JSON at position " + str(s["pos"]);
+fn json_parse_value(st) {
+    json_skip_ws(st);
+    let c = json_peek(st);
+    if c == -1 { throw "json: unexpected end of input"; }
+    if c == 34 { return json_parse_string(st); }    // "
+    if c == 123 { return json_parse_object(st); }   // {
+    if c == 91  { return json_parse_array(st); }    // [
+    if c == 116 { st[1] = st[1] + 4; return true; } // true
+    if c == 102 { st[1] = st[1] + 5; return false; } // false
+    if c == 110 { st[1] = st[1] + 4; return null; } // null
+    return json_parse_number(st);
 }
 
-fn parse_json(src) -> any {
-    let s = json_new_state(src);
-    let val = json_parse_value(s);
-    json_skip_ws(s);
-    return val;
+fn json_parse(s) {
+    let st = [s, 0];
+    let v = json_parse_value(st);
+    json_skip_ws(st);
+    if st[1] < len(s) { throw "json: trailing garbage at " + str(st[1]); }
+    return v;
+}
+
+fn json_escape(s) {
+    let out = "";
+    let i = 0;
+    while i < len(s) {
+        let c = byte_at(s, i);
+        if c == 34 { out = out + "\\\""; }
+        else if c == 92 { out = out + "\\\\"; }
+        else if c == 10 { out = out + "\\n"; }
+        else if c == 9  { out = out + "\\t"; }
+        else if c == 13 { out = out + "\\r"; }
+        else { out = out + bytes_to_str([c]); }
+        i = i + 1;
+    }
+    return out;
+}
+
+fn json_stringify(v) -> string {
+    let t = type(v);
+    if t == "null" { return "null"; }
+    if t == "bool" {
+        if v { return "true"; }
+        return "false";
+    }
+    if t == "number" { return str(v); }
+    if t == "string" { return "\"" + json_escape(v) + "\""; }
+    if t == "array" {
+        let parts = [];
+        let i = 0;
+        while i < len(v) {
+            push(parts, json_stringify(v[i]));
+            i = i + 1;
+        }
+        return "[" + join(parts, ",") + "]";
+    }
+    if t == "map" {
+        let parts = [];
+        for k in keys(v) {
+            push(parts, "\"" + json_escape(k) + "\":" + json_stringify(v[k]));
+        }
+        return "{" + join(parts, ",") + "}";
+    }
+    throw "json: cannot stringify " + t;
 }

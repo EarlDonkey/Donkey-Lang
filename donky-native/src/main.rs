@@ -16,11 +16,23 @@ fn main() {
         println!("  donky-native <file.donk>          (Tree-Walker)");
         println!("  donky-native vm <file.donk>       (Bytecode VM)");
         println!("  donky-native install              (Install from donky.json)");
+        println!("  donky-native add <name> <url|path> (Add dependency)");
         return;
     }
 
     if args[1] == "install" {
         if let Err(e) = package::install_from_manifest() { eprintln!("Package Error: {}", e); }
+        return;
+    }
+
+    if args[1] == "add" {
+        if args.len() < 4 {
+            eprintln!("Usage: donky-native add <name> <url-or-path>");
+            return;
+        }
+        if let Err(e) = package::add_dependency(&args[2], &args[3]) {
+            eprintln!("Package Error: {}", e);
+        }
         return;
     }
 

@@ -1,0 +1,7 @@
+import "lib/json.donk";
+
+let obj = json_parse("{\"a\":1,\"b\":[true,false,null],\"c\":\"hi\"}");
+print(obj["a"]);
+print(obj["c"]);
+print(json_stringify({"x": 1, "y": "z"}));
+print(json_stringify([1, 2, 3]));
