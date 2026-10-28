@@ -1,9 +1,11 @@
 {
   "locked": {
     "format": {
+      "sha256": "e595eb40e9621a38c60d3ac0e8b83649d57dd1a672c4a90d3b851c034c779c22",
       "url": "https://raw.githubusercontent.com/EarlDonkey/Donkey-Lang/main/lib/format.donk"
     },
     "strings": {
+      "sha256": "3a7b08fb631e83a24a8bb82b344f929b6bd321bbcaafbdb6ad5a0a8dfb674043",
       "url": "https://raw.githubusercontent.com/EarlDonkey/Donkey-Lang/main/lib/strings.donk"
     }
   },

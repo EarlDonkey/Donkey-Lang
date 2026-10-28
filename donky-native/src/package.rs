@@ -53,11 +53,14 @@ impl Dependency {
 pub fn install_from_manifest() -> Result<(), String> {
     let manifest_str = fs::read_to_string("donky.json")
         .map_err(|_| "Could not find donky.json in the current directory.".to_string())?;
-    let manifest: Manifest = serde_json::from_str(&manifest_str)
+    let mut manifest: Manifest = serde_json::from_str(&manifest_str)
         .map_err(|e| format!("Failed to parse donky.json: {}", e))?;
 
     println!("Resolving dependencies for {} v{}...", manifest.name, manifest.version);
     fs::create_dir_all("donky_modules").map_err(|e| e.to_string())?;
+
+    // Collect string-form → detailed-form upgrades to apply after the loop
+    let mut upgrades: Vec<(String, Dependency)> = Vec::new();
 
     for (name, dep) in &manifest.dependencies {
         println!("Installing {}...", name);
@@ -97,7 +100,7 @@ pub fn install_from_manifest() -> Result<(), String> {
             Some(_) => println!("  -> Hash verified."),
             None => {
                 println!("  -> No sha256 in manifest. Computed: {}", hash);
-                println!("     (run `donky-native add {} {}` to lock this hash)", name, url);
+                println!("     (locking this hash into donky.json...)");
             }
         }
 
@@ -138,6 +141,25 @@ pub fn install_from_manifest() -> Result<(), String> {
                 println!("  -> Saved raw file to {}", raw_path);
             }
         }
+
+        // Seal: if this was string-form, upgrade to detailed with pinned hash
+        if matches!(dep, Dependency::Url(_)) {
+            upgrades.push((name.clone(), Dependency::Detailed(DetailedDep {
+                url: Some(url.to_string()),
+                sha256: Some(hash.clone()),
+                path: None,
+            })));
+        }
+    }
+
+    // Apply upgrades and rewrite manifest if any happened
+    if !upgrades.is_empty() {
+        for (name, dep) in upgrades {
+            manifest.dependencies.insert(name, dep);
+        }
+        fs::write("donky.json", serde_json::to_string_pretty(&manifest).unwrap())
+            .map_err(|e| e.to_string())?;
+        println!("Sealed donky.json: string-form deps upgraded with pinned sha256");
     }
 
     write_lockfile(&manifest)?;
