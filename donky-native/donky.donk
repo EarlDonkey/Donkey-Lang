@@ -1,4 +1,4 @@
-﻿// lexer.donk â€” Self-Hosted Donky Lexer
+// lexer.donk â€” Self-Hosted Donky Lexer
 // Usage: .\target\release\donky-native.exe vm lexer.donk <file.donk>
 
 struct Token {
@@ -774,6 +774,39 @@ fn main() {
     write_file(out_path, join(bytecode, "\n"));
     print("Compiled to " + out_path);
 }
+
+fn boot() {
+    if len(args) < 1 {
+        print("usage: donky-native vm donky.donk <program.donk>");
+        return;
+    }
+
+    // Self-host mode: compile donky.donk with itself, then run the result
+    if args[0] == "donky.donk" {
+        print("=== SELF-HOST MODE ===");
+        let src = read_file("donky.donk");
+        let toks = tokenize(src);
+        let tree = parse(toks);
+        let self_bc = compile(tree);
+        print("self-compiled donky.donk: " + str(len(self_bc)) + " ops");
+        print("=== RUNNING SELF-COMPILED COMPILER ON test_math.donk ===");
+        run_bytecode(self_bc, ["test_math.donk"]);
+        return;
+    }
+
+    let path = args[0];
+    let source = read_file(path);
+    let tokens = tokenize(source);
+    let ast = parse(tokens);
+    let bytecode = compile(ast);
+    let bc_path = path + ".bytecode";
+    write_file(bc_path, join(bytecode, "\n"));
+    print("compiled " + path + " -> " + bc_path + " (" + str(len(bytecode)) + " ops)");
+    let bc_lines = split(read_file(bc_path), "\n");
+    run_bytecode(bc_lines, [path]);
+}
+
+boot();
 // vm.donk â€” Self-Hosted Donky Virtual Machine
 
 fn eval_op(op, a, b) {
@@ -812,9 +845,10 @@ fn call_builtin(name, args) {
 fn run_bytecode(bytecode, script_args) {
     let stack = [];
     let locals = {};
+    let globals = {};
     let call_stack = [];
     
-    locals["args"] = script_args;
+    globals["args"] = script_args;
     
     let ip = 0;
     let len_bc = len(bytecode);
@@ -839,6 +873,7 @@ fn run_bytecode(bytecode, script_args) {
         else if op == "SetLocal" { locals[arg] = pop(stack); }
         else if op == "GetLocal" { 
             if contains(locals, arg) { push(stack, locals[arg]); } 
+            else if contains(globals, arg) { push(stack, globals[arg]); }
             else { throw "Undefined variable: " + arg; }
         }
         else if op == "BinOp" {
@@ -858,13 +893,13 @@ fn run_bytecode(bytecode, script_args) {
             if !cond { ip = num(arg); continue; }
         }
         else if op == "DefineFunction" {
-            locals[parts[1]] = num(parts[2]);
+            globals[parts[1]] = num(parts[2]);
         }
         else if op == "Call" {
             let func_name = parts[1];
             let arg_count = num(parts[2]);
             
-            if !contains(locals, func_name) {
+            if !contains(globals, func_name) {
                 let args = [];
                 let i = 0;
                 while i < arg_count { push(args, pop(stack)); i = i + 1; }
@@ -874,7 +909,7 @@ fn run_bytecode(bytecode, script_args) {
                 let res = call_builtin(func_name, real_args);
                 push(stack, res);
             } else {
-                let func_addr = locals[func_name];
+                let func_addr = globals[func_name];
                 push(call_stack, { "ip": ip + 1, "locals": locals });
                 locals = {};
                 ip = func_addr;
@@ -933,28 +968,3 @@ fn run_bytecode(bytecode, script_args) {
         ip = ip + 1;
     }
 }
-
-// ============================================================
-// bootstrap entry point
-// ============================================================
-fn boot() {
-    if len(args) < 1 {
-        print("usage: donky-native vm donky.donk <program.donk>");
-        return;
-    }
-
-    let path = args[0];
-    let source = read_file(path);
-    let tokens = tokenize(source);
-    let ast = parse(tokens);
-    let bytecode = compile(ast);
-
-    let bc_path = path + ".bytecode";
-    write_file(bc_path, join(bytecode, "\n"));
-    print("compiled " + path + " -> " + bc_path + " (" + str(len(bytecode)) + " ops)");
-
-    let bc_lines = split(read_file(bc_path), "\n");
-    run_bytecode(bc_lines, [path]);
-}
-
-boot();

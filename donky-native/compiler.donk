@@ -229,3 +229,20 @@ fn main() {
     write_file(out_path, join(bytecode, "\n"));
     print("Compiled to " + out_path);
 }
+
+fn boot() {
+    if len(args) < 1 {
+        print("usage: donky-native vm donky.donk <program.donk>");
+        return;
+    }
+    let path   = args[0];
+    let source = read_file(path);
+    let tokens = tokenize(source);
+    let ast    = parse(tokens);
+    let bc     = compile(ast);
+    let bc_path = path + ".bytecode";
+    write_file(bc_path, join(bc, "\n"));
+    print("compiled " + path + " (" + str(len(bc)) + " ops)");
+    run_bytecode(split(read_file(bc_path), "\n"), [path]);
+}
+boot();

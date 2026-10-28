@@ -37,9 +37,10 @@ fn call_builtin(name, args) {
 fn run_bytecode(bytecode, script_args) {
     let stack = [];
     let locals = {};
+    let globals = {};
     let call_stack = [];
     
-    locals["args"] = script_args;
+    globals["args"] = script_args;
     
     let ip = 0;
     let len_bc = len(bytecode);
@@ -64,6 +65,7 @@ fn run_bytecode(bytecode, script_args) {
         else if op == "SetLocal" { locals[arg] = pop(stack); }
         else if op == "GetLocal" { 
             if contains(locals, arg) { push(stack, locals[arg]); } 
+            else if contains(globals, arg) { push(stack, globals[arg]); }
             else { throw "Undefined variable: " + arg; }
         }
         else if op == "BinOp" {
@@ -83,13 +85,13 @@ fn run_bytecode(bytecode, script_args) {
             if !cond { ip = num(arg); continue; }
         }
         else if op == "DefineFunction" {
-            locals[parts[1]] = num(parts[2]);
+            globals[parts[1]] = num(parts[2]);
         }
         else if op == "Call" {
             let func_name = parts[1];
             let arg_count = num(parts[2]);
             
-            if !contains(locals, func_name) {
+            if !contains(globals, func_name) {
                 let args = [];
                 let i = 0;
                 while i < arg_count { push(args, pop(stack)); i = i + 1; }
@@ -99,7 +101,7 @@ fn run_bytecode(bytecode, script_args) {
                 let res = call_builtin(func_name, real_args);
                 push(stack, res);
             } else {
-                let func_addr = locals[func_name];
+                let func_addr = globals[func_name];
                 push(call_stack, { "ip": ip + 1, "locals": locals });
                 locals = {};
                 ip = func_addr;
