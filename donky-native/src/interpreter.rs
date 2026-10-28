@@ -314,7 +314,6 @@ impl Interpreter {
                 } else { Err("Can only call methods on structs".to_string()) }
             }
             Expr::Call(name, args) => {
-                // ... all built-ins unchanged ...
                 if name == "tcp_listen" {
                     let p = self.evaluate(args[0].clone())?;
                     if let Value::Number(port) = p {
@@ -488,7 +487,9 @@ impl Interpreter {
                     let t = match self.evaluate(args[0].clone())? {
                         Value::Number(_) => "number", Value::String(_) => "string", Value::Bool(_) => "bool",
                         Value::Array(_) => "array", Value::Map(_) => "map", Value::Struct(..) => "struct",
-                        Value::Function { .. } => "function", Value::Null => "null",
+                        Value::Function { .. } => "function",
+                        Value::Closure(..) => "function",     // ← NEW
+                        Value::Null => "null",
                     };
                     return Ok(Value::String(t.to_string()));
                 }

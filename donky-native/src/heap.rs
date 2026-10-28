@@ -27,6 +27,8 @@ pub enum Value {
         body: Box<Stmt>,
         captured: Option<Rc<RefCell<Vec<HashMap<String, Value>>>>>,
     },
+    /// (func_idx, num_params, num_locals, captured_upvalues)
+    Closure(usize, usize, usize, Rc<RefCell<Vec<Value>>>),
     Array(usize),
     Map(usize),
     Struct(usize),
@@ -41,6 +43,7 @@ impl Value {
             Value::String(s) => s.clone(),
             Value::Bool(b) => b.to_string(),
             Value::Function { .. } => "<fn>".to_string(),
+            Value::Closure(..) => "<fn>".to_string(),
             Value::Array(idx) => format!("<array:{}>", idx),
             Value::Map(idx) => format!("<map:{}>", idx),
             Value::Struct(idx) => format!("<struct:{}>", idx),
@@ -95,6 +98,10 @@ impl Heap {
             }
             Value::Function { captured: Some(env), .. } => {
                 let vals: Vec<Value> = env.borrow().iter().flat_map(|s| s.values().cloned()).collect();
+                for v in vals { self.mark_value(&v); }
+            }
+            Value::Closure(_, _, _, captured) => {
+                let vals: Vec<Value> = captured.borrow().clone();
                 for v in vals { self.mark_value(&v); }
             }
             _ => {}
