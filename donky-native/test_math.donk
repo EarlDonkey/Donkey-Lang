@@ -1,4 +1,9 @@
-let a = 10;
-let b = 20;
-print(a + b * 2);
-print("Done!");
+let x = 10;
+let y = 20;
+print(x + y);
+
+fn sq(n) {
+    return n * n;
+}
+
+print(sq(7));

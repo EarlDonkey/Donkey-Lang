@@ -1,6 +1,4 @@
 // vm.donk — Self-Hosted Donky Virtual Machine
-// Usage: .\target\release\donky-native.exe vm vm.donk <file.donk>
-
 import "compiler.donk";
 
 fn eval_op(op, a, b) {
@@ -9,6 +7,7 @@ fn eval_op(op, a, b) {
     if op == "Star" { return a * b; }
     if op == "Slash" { return a / b; }
     if op == "EqEq" { return a == b; }
+    if op == "NotEq" { return a != b; }
     if op == "Lt" { return a < b; }
     if op == "Gt" { return a > b; }
     if op == "LtEq" { return a <= b; }
@@ -16,102 +15,146 @@ fn eval_op(op, a, b) {
     throw "Unknown operator: " + op;
 }
 
-fn run_bytecode(bytecode) {
+fn call_builtin(name, args) {
+    if name == "len" { return len(args[0]); }
+    if name == "push" { push(args[0], args[1]); return null; }
+    if name == "pop" { return pop(args[0]); }
+    if name == "split" { return split(args[0], args[1]); }
+    if name == "join" { return join(args[0], args[1]); }
+    if name == "num" { return num(args[0]); }
+    if name == "str" { return str(args[0]); }
+    if name == "read_file" { return read_file(args[0]); }
+    if name == "write_file" { write_file(args[0], args[1]); return null; }
+    if name == "byte_at" { return byte_at(args[0], args[1]); }
+    if name == "byte_substr" { return byte_substr(args[0], args[1], args[2]); }
+    if name == "bytes_to_str" { return bytes_to_str(args[0]); }
+    if name == "type" { return type(args[0]); }
+    if name == "contains" { return contains(args[0], args[1]); }
+    if name == "is_null" { return args[0] == null; }
+    throw "Unknown builtin: " + name;
+}
+
+fn run_bytecode(bytecode, script_args) {
     let stack = [];
     let locals = {};
+    let call_stack = [];
+    
+    locals["args"] = script_args;
     
     let ip = 0;
     let len_bc = len(bytecode);
 
     while ip < len_bc {
         let instruction = bytecode[ip];
-        
-        // Split instruction into opcode and argument
         let parts = split(instruction, " ");
         let op = parts[0];
         let arg = "";
         if len(parts) > 1 {
-            // If there are multiple spaces or parts, rejoin them
             let arg_parts = [];
             let i = 1;
-            while i < len(parts) {
-                push(arg_parts, parts[i]);
-                i = i + 1;
-            }
+            while i < len(parts) { push(arg_parts, parts[i]); i = i + 1; }
             arg = join(arg_parts, " ");
         }
 
-        // --- Execution Loop ---
-        if op == "PushNumber" {
-            push(stack, num(arg));
-        }
-        else if op == "PushString" {
-            push(stack, arg);
-        }
-        else if op == "PushBool" {
-            push(stack, arg == "true");
-        }
-        else if op == "Pop" {
-            pop(stack);
-        }
-        else if op == "SetLocal" {
-            locals[arg] = pop(stack);
-        }
-        else if op == "GetLocal" {
-            if contains(locals, arg) {
-                push(stack, locals[arg]);
-            } else {
-                throw "Undefined variable: " + arg;
-            }
+        if op == "PushNumber" { push(stack, num(arg)); }
+        else if op == "PushString" { push(stack, arg); }
+        else if op == "PushBool" { push(stack, arg == "true"); }
+        else if op == "PushNull" { push(stack, null); }
+        else if op == "Pop" { pop(stack); }
+        else if op == "SetLocal" { locals[arg] = pop(stack); }
+        else if op == "GetLocal" { 
+            if contains(locals, arg) { push(stack, locals[arg]); } 
+            else { throw "Undefined variable: " + arg; }
         }
         else if op == "BinOp" {
             let b = pop(stack);
             let a = pop(stack);
             push(stack, eval_op(arg, a, b));
         }
-        else if op == "Print" {
-            print(pop(stack));
+        else if op == "UnaryOp" {
+            let val = pop(stack);
+            if arg == "Minus" { push(stack, -val); }
+            else if arg == "Bang" { push(stack, !val); }
         }
-        else if op == "Jump" {
-            ip = num(arg);
-            continue; // Skip the ip increment below
-        }
+        else if op == "Print" { print(pop(stack)); }
+        else if op == "Jump" { ip = num(arg); continue; }
         else if op == "JumpIfFalse" {
             let cond = pop(stack);
-            if !cond {
-                ip = num(arg);
-                continue; // Skip the ip increment below
+            if !cond { ip = num(arg); continue; }
+        }
+        else if op == "DefineFunction" {
+            locals[parts[1]] = num(parts[2]);
+        }
+        else if op == "Call" {
+            let func_name = parts[1];
+            let arg_count = num(parts[2]);
+            
+            if !contains(locals, func_name) {
+                let args = [];
+                let i = 0;
+                while i < arg_count { push(args, pop(stack)); i = i + 1; }
+                let real_args = [];
+                let j = len(args) - 1;
+                while j >= 0 { push(real_args, args[j]); j = j - 1; }
+                let res = call_builtin(func_name, real_args);
+                push(stack, res);
+            } else {
+                let func_addr = locals[func_name];
+                push(call_stack, { "ip": ip + 1, "locals": locals });
+                locals = {};
+                ip = func_addr;
+                continue;
             }
         }
-        else if op == "Halt" {
-            break;
+        else if op == "Return" {
+            let ret_val = pop(stack);
+            if len(call_stack) > 0 {
+                let frame = pop(call_stack);
+                ip = frame["ip"];
+                locals = frame["locals"];
+                push(stack, ret_val);
+            } else { break; }
+            continue;
         }
-        else {
-            if !contains(instruction, "// Skipped") {
-                print("[VM Warning] Unknown opcode: " + instruction);
+        else if op == "MakeArray" {
+            let count = num(arg);
+            let arr = [];
+            let i = 0;
+            while i < count { push(arr, pop(stack)); i = i + 1; }
+            let final_arr = [];
+            let j = len(arr) - 1;
+            while j >= 0 { push(final_arr, arr[j]); j = j - 1; }
+            push(stack, final_arr);
+        }
+        else if op == "MakeMap" {
+            let count = num(arg);
+            let map = {};
+            let i = 0;
+            while i < count {
+                let val = pop(stack);
+                let key = pop(stack);
+                map[key] = val;
+                i = i + 1;
             }
+            push(stack, map);
         }
+        else if op == "Index" {
+            let idx = pop(stack);
+            let target = pop(stack);
+            push(stack, target[idx]);
+        }
+        else if op == "IndexSet" {
+            let val = pop(stack);
+            let idx = pop(stack);
+            let target = pop(stack);
+            target[idx] = val;
+        }
+        else if op == "Throw" {
+            let val = pop(stack);
+            throw "Exception: " + str(val);
+        }
+        else if op == "Halt" { break; }
         
         ip = ip + 1;
     }
 }
-
-fn main() {
-    if len(args) < 1 {
-        print("Usage: donky-native vm vm.donk <file.donk>");
-        return;
-    }
-    
-    let source = read_file(args[0]);
-    let tokens = tokenize(source);
-    let ast = parse(tokens);
-    
-    // Compile AST to Bytecode
-    let bytecode = compile(ast);
-    
-    print("=== Running Bytecode ===");
-    run_bytecode(bytecode);
-    print("=== Done ===");
-}
-
-main();

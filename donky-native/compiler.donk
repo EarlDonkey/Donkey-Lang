@@ -42,13 +42,27 @@ fn compile_expr(c, expr) {
         compile_expr(c, expr["right"]);
         emit(c, "UnaryOp " + expr["op"]);
     }
+    else if t == "Index" {
+        compile_expr(c, expr["target"]);
+        compile_expr(c, expr["index"]);
+        emit(c, "Index");
+    }
+    else if t == "Array" {
+        for el in expr["elements"] { compile_expr(c, el); }
+        emit(c, "MakeArray " + str(len(expr["elements"])));
+    }
+    else if t == "Map" {
+        for pair in expr["pairs"] {
+            compile_expr(c, pair[0]);
+            compile_expr(c, pair[1]);
+        }
+        emit(c, "MakeMap " + str(len(expr["pairs"])));
+    }
     else if t == "Call" {
-        // Compile arguments in reverse order for stack machine
         let args = expr["args"];
-        let i = len(args) - 1;
-        while i >= 0 {
-            compile_expr(c, args[i]);
-            i = i - 1;
+        // Compile in forward order now
+        for a in args {
+            compile_expr(c, a);
         }
         emit(c, "Call " + expr["name"] + " " + str(len(args)));
     }
@@ -61,19 +75,67 @@ fn compile_stmt(c, stmt) {
     if stmt == null { return; }
     let t = stmt["type"];
 
-    if t == "Let" {
+    if t == "Import" {
+        let path = stmt["path"];
+        let source = read_file(path);
+        let tokens = tokenize(source);
+        let ast = parse(tokens);
+        for s in ast {
+            compile_stmt(c, s);
+        }
+    }
+    else if t == "Struct" {
+        // Structs are dynamic maps in Donky, we skip them during compilation.
+    }
+    else if t == "Function" {
+        let jmp_idx = len(c["code"]);
+        emit(c, "Jump 0");
+        
+        let func_start = len(c["code"]);
+        
+        let params = stmt["params"];
+        let i = len(params) - 1;
+        while i >= 0 {
+            emit(c, "SetLocal " + params[i]);
+            i = i - 1;
+        }
+        
+        compile_stmt(c, stmt["body"]);
+        emit(c, "PushNull");
+        emit(c, "Return");
+        
+        c["code"][jmp_idx] = "Jump " + str(len(c["code"]));
+        
+        c["locals"][stmt["name"]] = func_start;
+        emit(c, "DefineFunction " + stmt["name"] + " " + str(func_start));
+    }
+    else if t == "Return" {
+        compile_expr(c, stmt["expr"]);
+        emit(c, "Return");
+    }
+    else if t == "Throw" {
+        compile_expr(c, stmt["expr"]);
+        emit(c, "Throw");
+    }
+    else if t == "Let" {
         compile_expr(c, stmt["expr"]);
         let name = stmt["name"];
-        let slot = c["next_local"];
-        c["locals"][name] = slot;
-        c["next_local"] = slot + 1;
+        c["locals"][name] = c["next_local"];
+        c["next_local"] = c["next_local"] + 1;
         emit(c, "SetLocal " + name);
     }
     else if t == "Assign" {
-        // Just simple assignment for now
-        let name = stmt["target"]["name"];
-        compile_expr(c, stmt["val"]);
-        emit(c, "SetLocal " + name);
+        let target = stmt["target"];
+        let val = stmt["val"];
+        if target["type"] == "Ident" {
+            compile_expr(c, val);
+            emit(c, "SetLocal " + target["name"]);
+        } else if target["type"] == "Index" {
+            compile_expr(c, target["target"]);
+            compile_expr(c, target["index"]);
+            compile_expr(c, val);
+            emit(c, "IndexSet");
+        }
     }
     else if t == "Print" {
         compile_expr(c, stmt["expr"]);
@@ -85,27 +147,20 @@ fn compile_stmt(c, stmt) {
     }
     else if t == "Block" {
         let stmts = stmt["stmts"];
-        for s in stmts {
-            compile_stmt(c, s);
-        }
+        for s in stmts { compile_stmt(c, s); }
     }
     else if t == "If" {
         compile_expr(c, stmt["cond"]);
         let jmp_if_idx = len(c["code"]);
-        emit(c, "JumpIfFalse 0"); // Patching later
+        emit(c, "JumpIfFalse 0");
         
         compile_stmt(c, stmt["then"]);
         
         if stmt["else"] != null {
             let jmp_over_idx = len(c["code"]);
             emit(c, "Jump 0");
-            
-            // Patch JumpIfFalse to here
             c["code"][jmp_if_idx] = "JumpIfFalse " + str(len(c["code"]));
-            
             compile_stmt(c, stmt["else"]);
-            
-            // Patch Jump over to here
             c["code"][jmp_over_idx] = "Jump " + str(len(c["code"]));
         } else {
             c["code"][jmp_if_idx] = "JumpIfFalse " + str(len(c["code"]));
@@ -113,52 +168,64 @@ fn compile_stmt(c, stmt) {
     }
     else if t == "While" {
         let loop_start = len(c["code"]);
-        
         compile_expr(c, stmt["cond"]);
         let jmp_if_idx = len(c["code"]);
         emit(c, "JumpIfFalse 0");
-        
         compile_stmt(c, stmt["body"]);
-        
         emit(c, "Jump " + str(loop_start));
         c["code"][jmp_if_idx] = "JumpIfFalse " + str(len(c["code"]));
     }
-    else if t == "Function" {
-        // We need to compile the body into a separate array,
-        // but for this simple proof-of-concept we will inline it or skip it.
-        // True functions require a constant pool and closures.
-        emit(c, "// Skipped function compilation: " + stmt["name"]);
-    }
-    else {
-        emit(c, "// Unhandled Stmt: " + t);
+    else if t == "For" {
+        let var_name = stmt["var"];
+        let iter_expr = stmt["iter"];
+        let body = stmt["body"];
+        let iter_slot = "__iter_" + str(len(c["code"]));
+        let idx_slot = "__idx_" + str(len(c["code"]));
+        
+        compile_expr(c, iter_expr);
+        emit(c, "SetLocal " + iter_slot);
+        emit(c, "PushNumber 0");
+        emit(c, "SetLocal " + idx_slot);
+        
+        let loop_start = len(c["code"]);
+        emit(c, "GetLocal " + idx_slot);
+        emit(c, "GetLocal " + iter_slot);
+        emit(c, "Call len 1");
+        emit(c, "BinOp Lt");
+        let jmp_if_idx = len(c["code"]);
+        emit(c, "JumpIfFalse 0");
+        
+        emit(c, "GetLocal " + iter_slot);
+        emit(c, "GetLocal " + idx_slot);
+        emit(c, "Index");
+        emit(c, "SetLocal " + var_name);
+        
+        compile_stmt(c, body);
+        
+        emit(c, "GetLocal " + idx_slot);
+        emit(c, "PushNumber 1");
+        emit(c, "BinOp Plus");
+        emit(c, "SetLocal " + idx_slot);
+        
+        emit(c, "Jump " + str(loop_start));
+        c["code"][jmp_if_idx] = "JumpIfFalse " + str(len(c["code"]));
     }
 }
 
 fn compile(ast) -> array {
     let c = make_compiler();
-    for stmt in ast {
-        compile_stmt(c, stmt);
-    }
+    for stmt in ast { compile_stmt(c, stmt); }
     emit(c, "Halt");
     return c["code"];
 }
 
 fn main() {
-    if len(args) < 1 {
-        print("Usage: donky-native vm compiler.donk <file.donk>");
-        return;
-    }
+    if len(args) < 1 { return; }
     let source = read_file(args[0]);
     let tokens = tokenize(source);
     let ast = parse(tokens);
-    
-    print("--- AST Parsed. Compiling to Bytecode ---");
     let bytecode = compile(ast);
-    
-    print("=== Generated Bytecode ===");
-    for op in bytecode {
-        print(op);
-    }
+    let out_path = args[0] + ".bytecode";
+    write_file(out_path, join(bytecode, "\n"));
+    print("Compiled to " + out_path);
 }
-
-//main();
