@@ -1,11 +1,17 @@
-let my_arr = [10.0, 20.0, 30.0];
-my_arr[1] = 99.0;
+let my_arr = [10.0, 20.0];
+push(my_arr, 30.0);
+print(len(my_arr));
+
+let last = pop(my_arr);
+print(last);
 print(my_arr);
 
-let user = {
-    "name": "Agent",
-    "id": 42.0,
-    "scores": my_arr
-};
+let s = str(42.0);
+print(s);
 
-print(user);
+// Using the correct relative path from where donky_app.exe runs
+let f = read_file("donky-native/native_test.donk");
+print(len(f));
+
+let n = num("123.45");
+print(n + 1.0);

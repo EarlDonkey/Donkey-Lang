@@ -125,12 +125,13 @@ int is_number(uint64_t v) { return (v & TAG_MASK) != TAG_BASE; }
 double as_number(uint64_t v) { double d; memcpy(&d, &v, 8); return d; }
 uint64_t get_tag(uint64_t v) { return (v >> 48) & 0x7; }
 uint64_t as_index(uint64_t v) { return v & 0x0000FFFFFFFFFFFFULL; }
+uint64_t make_number(double d) { uint64_t v; memcpy(&v, &d, 8); return v; }
 
 void print_value(uint64_t val) {
     if (is_number(val)) {
         double d = as_number(val);
         if (d == (long long)d) printf("%lld", (long long)d);
-        else printf("%f", d);
+        else printf("%g", d);
     } else if (get_tag(val) == TAG_STRING) {
         printf("%s", (char*)as_index(val));
     } else if (get_tag(val) == TAG_ARRAY) {
@@ -172,13 +173,14 @@ uint64_t donky_alloc_array() {
     return TAG_BASE | (TAG_ARRAY << 48) | (uint64_t)arr;
 }
 
-void donky_array_push(uint64_t arr_val, uint64_t val) {
+uint64_t donky_array_push(uint64_t arr_val, uint64_t val) {
     Array* arr = (Array*)as_index(arr_val);
     if (arr->len == arr->cap) {
         arr->cap = arr->cap == 0 ? 4 : arr->cap * 2;
         arr->data = realloc(arr->data, arr->cap * sizeof(uint64_t));
     }
     arr->data[arr->len++] = val;
+    return 0; // Return null
 }
 
 uint64_t donky_alloc_map() {
@@ -187,13 +189,10 @@ uint64_t donky_alloc_map() {
     return TAG_BASE | (TAG_MAP << 48) | (uint64_t)map;
 }
 
-void donky_map_set(uint64_t map_val, uint64_t key, uint64_t val) {
+uint64_t donky_map_set(uint64_t map_val, uint64_t key, uint64_t val) {
     Map* map = (Map*)as_index(map_val);
     for (size_t i = 0; i < map->len; i++) {
-        if (map->keys[i] == key) {
-            map->vals[i] = val;
-            return;
-        }
+        if (map->keys[i] == key) { map->vals[i] = val; return 0; }
     }
     if (map->len == map->cap) {
         map->cap = map->cap == 0 ? 4 : map->cap * 2;
@@ -203,6 +202,7 @@ void donky_map_set(uint64_t map_val, uint64_t key, uint64_t val) {
     map->keys[map->len] = key;
     map->vals[map->len] = val;
     map->len++;
+    return 0;
 }
 
 uint64_t donky_index_get(uint64_t target, uint64_t index) {
@@ -219,7 +219,7 @@ uint64_t donky_index_get(uint64_t target, uint64_t index) {
     return 0;
 }
 
-void donky_index_set(uint64_t target, uint64_t index, uint64_t val) {
+uint64_t donky_index_set(uint64_t target, uint64_t index, uint64_t val) {
     if (get_tag(target) == TAG_ARRAY) {
         Array* arr = (Array*)as_index(target);
         size_t i = (size_t)as_number(index);
@@ -227,8 +227,85 @@ void donky_index_set(uint64_t target, uint64_t index, uint64_t val) {
     } else if (get_tag(target) == TAG_MAP) {
         donky_map_set(target, index, val);
     }
+    return 0;
 }
 
+// ==========================================
+// STANDARD LIBRARY BUILTINS
+// ==========================================
+
+uint64_t donky_len(uint64_t val) {
+    if (get_tag(val) == TAG_ARRAY) {
+        return make_number((double)((Array*)as_index(val))->len);
+    } else if (get_tag(val) == TAG_STRING) {
+        return make_number((double)strlen((char*)as_index(val)));
+    } else if (get_tag(val) == TAG_MAP) {
+        return make_number((double)((Map*)as_index(val))->len);
+    }
+    return make_number(0.0);
+}
+
+uint64_t donky_push(uint64_t arr, uint64_t val) {
+    return donky_array_push(arr, val);
+}
+
+uint64_t donky_pop(uint64_t arr_val) {
+    if (get_tag(arr_val) == TAG_ARRAY) {
+        Array* arr = (Array*)as_index(arr_val);
+        if (arr->len > 0) {
+            return arr->data[--arr->len];
+        }
+    }
+    return 0; // null
+}
+
+uint64_t donky_str(uint64_t val) {
+    char buf[256];
+    if (is_number(val)) {
+        double d = as_number(val);
+        if (d == (long long)d) sprintf(buf, "%lld", (long long)d);
+        else sprintf(buf, "%f", d);
+    } else if (get_tag(val) == TAG_STRING) {
+        return val; // already a string
+    } else if (get_tag(val) == TAG_ARRAY) {
+        strcpy(buf, "[array]");
+    } else if (get_tag(val) == TAG_MAP) {
+        strcpy(buf, "{map}");
+    } else {
+        strcpy(buf, "null");
+    }
+    return donky_alloc_string(buf);
+}
+
+uint64_t donky_num(uint64_t val) {
+    if (is_number(val)) return val;
+    if (get_tag(val) == TAG_STRING) {
+        return make_number(atof((char*)as_index(val)));
+    }
+    return make_number(0.0);
+}
+
+uint64_t donky_read_file(uint64_t path_val) {
+    if (get_tag(path_val) != TAG_STRING) return 0;
+    FILE* f = fopen((char*)as_index(path_val), "rb");
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    char* buf = malloc(len + 1);
+    fread(buf, 1, len, f);
+    buf[len] = 0;
+    fclose(f);
+    
+    uint64_t res = donky_alloc_string(buf);
+    free(buf);
+    return res;
+}
+
+// ==========================================
+// ENTRY POINT
+// ==========================================
 int main() {
     extern void donky_main();
     donky_main();

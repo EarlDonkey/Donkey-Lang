@@ -15,6 +15,14 @@ pub struct RuntimeFuncs {
     pub index_get_id: FuncId,
     pub index_set_id: FuncId,
     pub alloc_string_id: FuncId,
+    
+    // Standard Library
+    pub len_id: FuncId,
+    pub push_id: FuncId,
+    pub pop_id: FuncId,
+    pub str_id: FuncId,
+    pub num_id: FuncId,
+    pub read_file_id: FuncId,
 }
 
 pub struct AotCompiler {
@@ -49,12 +57,19 @@ impl AotCompiler {
         let runtime = RuntimeFuncs {
             print_id: declare("donky_print", &[types::I64], None),
             alloc_array_id: declare("donky_alloc_array", &[], Some(types::I64)),
-            array_push_id: declare("donky_array_push", &[types::I64, types::I64], None),
+            array_push_id: declare("donky_array_push", &[types::I64, types::I64], Some(types::I64)),
             alloc_map_id: declare("donky_alloc_map", &[], Some(types::I64)),
-            map_set_id: declare("donky_map_set", &[types::I64, types::I64, types::I64], None),
+            map_set_id: declare("donky_map_set", &[types::I64, types::I64, types::I64], Some(types::I64)),
             index_get_id: declare("donky_index_get", &[types::I64, types::I64], Some(types::I64)),
-            index_set_id: declare("donky_index_set", &[types::I64, types::I64, types::I64], None),
+            index_set_id: declare("donky_index_set", &[types::I64, types::I64, types::I64], Some(types::I64)),
             alloc_string_id: declare("donky_alloc_string", &[types::I64], Some(types::I64)),
+            
+            len_id: declare("donky_len", &[types::I64], Some(types::I64)),
+            push_id: declare("donky_push", &[types::I64, types::I64], Some(types::I64)),
+            pop_id: declare("donky_pop", &[types::I64], Some(types::I64)),
+            str_id: declare("donky_str", &[types::I64], Some(types::I64)),
+            num_id: declare("donky_num", &[types::I64], Some(types::I64)),
+            read_file_id: declare("donky_read_file", &[types::I64], Some(types::I64)),
         };
         
         AotCompiler {
@@ -67,6 +82,7 @@ impl AotCompiler {
     }
 
     pub fn compile_to_object(mut self, stmts: &[Stmt], output_path: &str) -> Result<(), String> {
+        // 1. PREPASS: Declare all user functions
         for stmt in stmts {
             if let Stmt::Function(name, params, _) = stmt {
                 let mut sig = self.module.make_signature();
@@ -77,6 +93,7 @@ impl AotCompiler {
             }
         }
 
+        // 2. DEFINE USER FUNCTIONS
         for stmt in stmts {
             if let Stmt::Function(name, params, body) = stmt {
                 let func_id = self.user_functions[name];
@@ -84,8 +101,8 @@ impl AotCompiler {
             }
         }
 
+        // 3. DEFINE MAIN (Exported as donky_main for the C runtime)
         let sig = self.module.make_signature();
-        // RENAME TO donky_main to avoid clashing with C's main()
         let main_id = self.module.declare_function("donky_main", Linkage::Export, &sig).unwrap();
         self.ctx.func.signature = sig;
 
@@ -113,7 +130,7 @@ impl AotCompiler {
         self.module.define_function(main_id, &mut self.ctx).unwrap();
         self.module.clear_context(&mut self.ctx);
         
-        // ObjectModule doesn't have finalize_definitions
+        // 4. EMIT OBJECT FILE
         let product = self.module.finish();
         let bytes = product.emit().unwrap();
         std::fs::write(output_path, bytes).map_err(|e| e.to_string())?;
@@ -291,7 +308,6 @@ impl AotCompiler {
             Expr::Number(n) => builder.ins().iconst(types::I64, n.to_bits() as i64),
             Expr::Bool(b) => builder.ins().iconst(types::I64, (if *b { 1.0_f64 } else { 0.0_f64 }).to_bits() as i64),
             Expr::String(s) => {
-                // Allocate the string data in the object file
                 let data_id = module.declare_data(&format!("str_{}_{}", s.len(), s.as_ptr() as usize), Linkage::Export, true, false).unwrap();
                 let mut data_ctx = DataDescription::new();
                 let mut bytes = s.as_bytes().to_vec();
@@ -311,14 +327,38 @@ impl AotCompiler {
                 builder.use_var(*var)
             }
             Expr::Call(name, args) => {
-                let func_id = user_funcs.get(name).expect(&format!("Undefined function: {}", name));
-                let local_callee = module.declare_func_in_func(*func_id, builder.func);
-                let mut arg_vals = Vec::new();
-                for arg in args {
-                    arg_vals.push(Self::compile_expr(builder, module, runtime, user_funcs, fctx, arg));
+                if let Some(func_id) = user_funcs.get(name) {
+                    let local_callee = module.declare_func_in_func(*func_id, builder.func);
+                    let mut arg_vals = Vec::new();
+                    for arg in args {
+                        arg_vals.push(Self::compile_expr(builder, module, runtime, user_funcs, fctx, arg));
+                    }
+                    let call = builder.ins().call(local_callee, &arg_vals);
+                    builder.inst_results(call)[0]
+                } else {
+                    let builtin_id = match name.as_str() {
+                        "len" => runtime.len_id,
+                        "push" => runtime.push_id,
+                        "pop" => runtime.pop_id,
+                        "str" => runtime.str_id,
+                        "num" => runtime.num_id,
+                        "read_file" => runtime.read_file_id,
+                        _ => panic!("Unknown builtin function: {}", name),
+                    };
+                    
+                    let local_callee = module.declare_func_in_func(builtin_id, builder.func);
+                    let mut arg_vals = Vec::new();
+                    for arg in args {
+                        arg_vals.push(Self::compile_expr(builder, module, runtime, user_funcs, fctx, arg));
+                    }
+                    let call = builder.ins().call(local_callee, &arg_vals);
+                    let results = builder.inst_results(call);
+                    if results.is_empty() {
+                        builder.ins().iconst(types::I64, 0)
+                    } else {
+                        results[0]
+                    }
                 }
-                let call = builder.ins().call(local_callee, &arg_vals);
-                builder.inst_results(call)[0]
             }
             Expr::Array(elements) => {
                 let arr_func = module.declare_func_in_func(runtime.alloc_array_id, builder.func);
