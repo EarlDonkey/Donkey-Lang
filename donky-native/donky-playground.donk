@@ -1,9 +1,10 @@
-// donky-playground.donk — Donky language playground & web server
-// Run from DonkyPlay/ directory:
-//   .\donky-native.exe vm donky-playground.donk
-// Then open http://localhost:8080 in a browser.
+// donky-playground.donk — In-process Donky playground server.
+// Compiles and runs submitted code via the self-hosted compiler + mini-VM.
+// No system() subprocess. One binary, one process.
 
 import "json.donk";
+import "compiler.donk";
+import "vm.donk";
 
 // ============================================================
 // HTTP parsing & helpers
@@ -88,33 +89,51 @@ fn route_run(body) -> string {
             return http_response("200 OK", "application/json", json_stringify(result));
         }
 
-        // Generate unique temporary file to prevent race conditions across concurrent requests
-        let rand_id = str(random(999999));
-        let tmp_file = "temp_snippet_" + rand_id + ".donk";
-        write_file(tmp_file, code);
-
-        // Execute VM directly via system() which captures stdout and stderr
-        let output = system(".\\donky-native.exe vm " + tmp_file);
-
-        // Clean up temporary snippet file
-        system("cmd /C del /f /q " + tmp_file + " >nul 2>&1");
+        let tokens = tokenize(code);
+        let ast = parse(tokens);
+        let bytecode = compile(ast);
+        let output = run_bytecode_capture(bytecode, []);
 
         result["ok"] = true;
         result["output"] = output;
         return http_response("200 OK", "application/json", json_stringify(result));
     } catch e {
         result["ok"] = false;
-        result["output"] = "server error: " + e;
-        return http_response("500 Internal Server Error", "application/json", json_stringify(result));
+        result["output"] = "error: " + str(e);
+        return http_response("200 OK", "application/json", json_stringify(result));
+    }
+}
+
+fn route_compile(body) -> string {
+    let result = {};
+    try {
+        let req = json_parse(body);
+        let code = json_get(req, "code", "");
+        if code == "" {
+            result["ok"] = false;
+            result["output"] = "empty code";
+            return http_response("200 OK", "application/json", json_stringify(result));
+        }
+        let tokens = tokenize(code);
+        let ast = parse(tokens);
+        let bytecode = compile(ast);
+        result["ok"] = true;
+        result["bytecode"] = bytecode;
+        return http_response("200 OK", "application/json", json_stringify(result));
+    } catch e {
+        result["ok"] = false;
+        result["output"] = "compile error: " + str(e);
+        return http_response("200 OK", "application/json", json_stringify(result));
     }
 }
 
 // ============================================================
-// Main Server Loop
+// Main server loop
 // ============================================================
 
 fn main() {
-    print("Donky Playground starting on http://localhost:8080");
+    print("Donky Playground (in-process compiler + mini-VM)");
+    print("Listening on http://localhost:8080");
     print("Press Ctrl+C to stop.");
     let server_id = tcp_listen(8080);
     while true {
@@ -126,7 +145,6 @@ fn main() {
                 let headers = split_result[0];
                 let body = split_result[1];
 
-                // Ensure full body payload is received if fragmented over TCP
                 let expected_len = http_content_length(headers);
                 while expected_len > 0 && len(body) < expected_len {
                     let chunk = tcp_read(client_id, 65536);
@@ -141,10 +159,11 @@ fn main() {
                 let response = "";
                 if method == "POST" && path == "/run" {
                     response = route_run(body);
+                } else if method == "POST" && path == "/compile" {
+                    response = route_compile(body);
                 } else if method == "GET" && path == "/favicon.ico" {
                     response = http_response("404 Not Found", "text/plain", "");
                 } else {
-                    // Single Page Application (SPA) routing: serve index.html for all UI paths
                     response = route_index();
                 }
 

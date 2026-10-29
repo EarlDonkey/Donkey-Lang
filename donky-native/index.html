@@ -738,9 +738,18 @@
           </div>
 
           <div id="terminal-screen" class="p-3 font-mono text-xs overflow-y-auto flex-1 bg-[#0d0d0f] text-gray-200">
-            <div class="text-gray-500">// Donky VM Execution Console</div>
-            <div id="terminal-log-content" class="space-y-1">
-              <div class="text-green-400">[SYSTEM] Donky-Lang v1.0 VM ready. Press "Run" or Ctrl+Enter.</div>
+            <div id="terminal-content-output">
+              <div class="text-gray-500">// Donky VM Execution Console</div>
+              <div id="terminal-log-content" class="space-y-1">
+                <div class="text-green-400">[SYSTEM] Donky-Lang v1.0 VM ready. Press "Run" or Ctrl+Enter.</div>
+              </div>
+            </div>
+            <div id="terminal-content-opcodes" class="hidden">
+              <div class="text-gray-500">// Bytecode disassembly — compiled by Donky's self-hosted compiler</div>
+              <div id="terminal-opcodes-list" class="space-y-0.5 mt-2"></div>
+            </div>
+            <div id="terminal-content-asm" class="hidden">
+              <div class="text-gray-500">// x86-64 NASM codegen — not yet wired to playground</div>
             </div>
           </div>
         </div>
@@ -1800,11 +1809,19 @@ async function runDonkyCode() {
   appendLog('[VM] Executing ' + activeTab + '...', 'text-donky-orange font-bold');
 
   try {
-    const resp = await fetch('/run', {
+    // Kick off both requests in parallel
+    const runPromise = fetch('/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code })
     });
+    const compilePromise = fetch('/compile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code })
+    }).catch(() => null);
+
+    const resp = await runPromise;
     const data = await resp.json();
     const elapsed = (performance.now() - start).toFixed(2);
     document.getElementById('execution-stat-time').innerText = `VM Cycle: ~160 ns (${elapsed}ms)`;
@@ -1817,6 +1834,22 @@ async function runDonkyCode() {
       appendLog('out &gt; (no output)', 'text-gray-500');
     }
     appendLog('[VM] Exit 0.', 'text-green-400 text-[11px]');
+    setTerminalTab('opcodes');
+
+    // Render bytecode into the OPCODES tab
+    const compileResp = await compilePromise;
+    if (compileResp) {
+      try {
+        const cdata = await compileResp.json();
+        if (cdata.ok && Array.isArray(cdata.bytecode)) {
+          renderBytecode(cdata.bytecode);
+        } else {
+          renderBytecodeError(cdata.output || 'compile failed');
+        }
+      } catch (e) {
+        renderBytecodeError('could not parse /compile response');
+      }
+    }
   } catch (err) {
     // Offline simulation
     let printed = 0;
@@ -1832,6 +1865,27 @@ async function runDonkyCode() {
     if (printed === 0) appendLog('out &gt; (offline simulation)', 'text-gray-500');
     appendLog('[VM] Server unreachable — start with: .\\donky-native.exe vm donky-playground.donk', 'text-yellow-400 text-[11px]');
   }
+}
+
+function renderBytecode(bytecode) {
+  const list = document.getElementById('terminal-opcodes-list');
+  if (!list) return;
+  list.innerHTML = '';
+  bytecode.forEach((bc, i) => {
+    const div = document.createElement('div');
+    div.className = 'flex gap-3';
+    div.innerHTML =
+      `<span class="text-gray-500 w-12 shrink-0">${String(i).padStart(4, '0')}</span>` +
+      `<span class="text-donky-orange">${escapeHtml(bc)}</span>`;
+    list.appendChild(div);
+  });
+  showToast(`Bytecode ready (${bytecode.length} ops) — see VM OPCODES tab`);
+}
+
+function renderBytecodeError(msg) {
+  const list = document.getElementById('terminal-opcodes-list');
+  if (!list) return;
+  list.innerHTML = `<div class="text-red-400">// ${escapeHtml(msg)}</div>`;
 }
 
 function appendLog(msg, cls) {
@@ -1857,9 +1911,15 @@ function copyTerminalOutput() {
 function setTerminalTab(tab) {
   ['output', 'opcodes', 'asm'].forEach(t => {
     const btn = document.getElementById('term-tab-' + t);
-    if (!btn) return;
-    if (t === tab) btn.className = 'text-donky-orange font-bold border-b border-donky-orange pb-0.5';
-    else btn.className = 'hover:text-white pb-0.5';
+    if (btn) {
+      if (t === tab) btn.className = 'text-donky-orange font-bold border-b border-donky-orange pb-0.5';
+      else btn.className = 'hover:text-white pb-0.5';
+    }
+    const pane = document.getElementById('terminal-content-' + t);
+    if (pane) {
+      if (t === tab) pane.classList.remove('hidden');
+      else pane.classList.add('hidden');
+    }
   });
 }
 

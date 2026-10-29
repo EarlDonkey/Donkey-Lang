@@ -1,5 +1,6 @@
 // vm.donk — Self-Hosted Donky Virtual Machine
-import "compiler.donk";
+// Refactored: run_bytecode_capture() collects Print output into a string
+// so the playground can serve compiled code without stdout bleed.
 
 fn eval_op(op, a, b) {
     if op == "Plus" { return a + b; }
@@ -35,13 +36,23 @@ fn call_builtin(name, args) {
 }
 
 fn run_bytecode(bytecode, script_args) {
+    _run_bytecode_impl(bytecode, script_args, null);
+}
+
+fn run_bytecode_capture(bytecode, script_args) -> string {
+    let sink = [];
+    _run_bytecode_impl(bytecode, script_args, sink);
+    return join(sink, "\n");
+}
+
+fn _run_bytecode_impl(bytecode, script_args, output_sink) {
     let stack = [];
     let locals = {};
     let globals = {};
     let call_stack = [];
-    
+
     globals["args"] = script_args;
-    
+
     let ip = 0;
     let len_bc = len(bytecode);
 
@@ -63,8 +74,8 @@ fn run_bytecode(bytecode, script_args) {
         else if op == "PushNull" { push(stack, null); }
         else if op == "Pop" { pop(stack); }
         else if op == "SetLocal" { locals[arg] = pop(stack); }
-        else if op == "GetLocal" { 
-            if contains(locals, arg) { push(stack, locals[arg]); } 
+        else if op == "GetLocal" {
+            if contains(locals, arg) { push(stack, locals[arg]); }
             else if contains(globals, arg) { push(stack, globals[arg]); }
             else { throw "Undefined variable: " + arg; }
         }
@@ -78,7 +89,14 @@ fn run_bytecode(bytecode, script_args) {
             if arg == "Minus" { push(stack, -val); }
             else if arg == "Bang" { push(stack, !val); }
         }
-        else if op == "Print" { print(pop(stack)); }
+        else if op == "Print" {
+            let v = pop(stack);
+            if output_sink == null {
+                print(v);
+            } else {
+                push(output_sink, str(v));
+            }
+        }
         else if op == "Jump" { ip = num(arg); continue; }
         else if op == "JumpIfFalse" {
             let cond = pop(stack);
@@ -90,7 +108,6 @@ fn run_bytecode(bytecode, script_args) {
         else if op == "Call" {
             let func_name = parts[1];
             let arg_count = num(parts[2]);
-            
             if !contains(globals, func_name) {
                 let args = [];
                 let i = 0;
@@ -153,10 +170,15 @@ fn run_bytecode(bytecode, script_args) {
         }
         else if op == "Throw" {
             let val = pop(stack);
-            throw "Exception: " + str(val);
+            if output_sink == null {
+                throw "Exception: " + str(val);
+            } else {
+                push(output_sink, "Exception: " + str(val));
+                return;
+            }
         }
         else if op == "Halt" { break; }
-        
+
         ip = ip + 1;
     }
 }
