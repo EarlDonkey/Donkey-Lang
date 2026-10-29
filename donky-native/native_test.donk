@@ -1,7 +1,8 @@
-let x = 10.0;
-let y = 20.0;
-let z = x + y * 2.0;
-print(z);
+fn fib(n) {
+    if n < 2.0 {
+        return n;
+    }
+    return fib(n - 1.0) + fib(n - 2.0);
+}
 
-let a = z / 5.0;
-print(a);
+print(fib(20.0));
