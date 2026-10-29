@@ -33,7 +33,10 @@ pub enum OpCode {
     DefineFunctionGlobal(String, usize, usize, u32),
     GetGlobal(u32),
     SetGlobal(u32),
-    Call(usize), Builtin(String, usize), MethodCall(String, usize),
+    Call(usize), CallGlobal(u32, usize),
+    Builtin(String, usize), MethodCall(String, usize),
+    PushLocalAddConst(u32, f64),
+    PushLocalSubConst(u32, f64),
     Return, Array(usize), Map(usize), Struct(String, Vec<String>),
     FieldAccess(String), FieldSet(String),
     Index, IndexSet,
@@ -151,6 +154,16 @@ fn peephole(code: Vec<OpCode>) -> Vec<OpCode> {
                 }
             }
         }
+        // NEW RULE: GetLocal(a), ConstantNumber(k), Add/Sub  →  PushLocalAddConst / PushLocalSubConst
+        if i + 2 < code.len() && clean(i, 3) {
+            if let (OpCode::GetLocal(a), OpCode::ConstantNumber(k)) = (&code[i], &code[i + 1]) {
+                match &code[i + 2] {
+                    OpCode::Add => { new_code.push(OpCode::PushLocalAddConst(*a as u32, *k)); i += 3; continue; }
+                    OpCode::Sub => { new_code.push(OpCode::PushLocalSubConst(*a as u32, *k)); i += 3; continue; }
+                    _ => {}
+                }
+            }
+        }
         new_code.push(code[i].clone()); i += 1;
     }
     old_to_new[code.len()] = new_code.len();
@@ -165,7 +178,6 @@ fn peephole(code: Vec<OpCode>) -> Vec<OpCode> {
     }
     new_code
 }
-
 // ===================== COMPILER =====================
 
 struct LoopContext { continue_jumps: Vec<usize>, break_jumps: Vec<usize> }
@@ -633,8 +645,7 @@ impl Compiler {
                         self.code.push(PendingOp::GetUpvalue(idx));
                         self.code.push(PendingOp::Ready(OpCode::Call(args.len())));
                     } else if let Some(gslot) = self.lookup_global(&name) {
-                        self.code.push(PendingOp::Ready(OpCode::GetGlobal(gslot)));
-                        self.code.push(PendingOp::Ready(OpCode::Call(args.len())));
+                        self.code.push(PendingOp::Ready(OpCode::CallGlobal(gslot, args.len())));
                     } else {
                         for _ in 0..args.len() { self.code.push(PendingOp::Ready(OpCode::Pop)); }
                         self.code.push(PendingOp::Ready(OpCode::ConstantNull));
@@ -642,10 +653,43 @@ impl Compiler {
                 }
             }
             Expr::Unary(op, right) => {
+                // Constant folding
+                if let (TokenType::Minus, Expr::Number(n)) = (&op, &*right) {
+                    self.code.push(PendingOp::Ready(OpCode::ConstantNumber(-*n)));
+                    return;
+                }
+                if let (TokenType::Bang, Expr::Bool(b)) = (&op, &*right) {
+                    self.code.push(PendingOp::Ready(OpCode::ConstantBool(!*b)));
+                    return;
+                }
                 self.compile_expr(*right);
                 match op { TokenType::Minus => self.code.push(PendingOp::Ready(OpCode::Negate)), TokenType::Bang => self.code.push(PendingOp::Ready(OpCode::Not)), _ => {} }
             }
             Expr::Binary(l, op, r) => {
+                // Constant folding: number op number
+                if let (Expr::Number(a), Expr::Number(b)) = (&*l, &*r) {
+                    let (a, b) = (*a, *b);
+                    match op {
+                        TokenType::Plus    => { self.code.push(PendingOp::Ready(OpCode::ConstantNumber(a + b))); return; }
+                        TokenType::Minus   => { self.code.push(PendingOp::Ready(OpCode::ConstantNumber(a - b))); return; }
+                        TokenType::Star    => { self.code.push(PendingOp::Ready(OpCode::ConstantNumber(a * b))); return; }
+                        TokenType::Slash   if b != 0.0 => { self.code.push(PendingOp::Ready(OpCode::ConstantNumber(a / b))); return; }
+                        TokenType::Percent if b != 0.0 => { self.code.push(PendingOp::Ready(OpCode::ConstantNumber(a % b))); return; }
+                        TokenType::EqEq    => { self.code.push(PendingOp::Ready(OpCode::ConstantBool(a == b))); return; }
+                        TokenType::NotEq   => { self.code.push(PendingOp::Ready(OpCode::ConstantBool(a != b))); return; }
+                        TokenType::Lt      => { self.code.push(PendingOp::Ready(OpCode::ConstantBool(a < b))); return; }
+                        TokenType::Gt      => { self.code.push(PendingOp::Ready(OpCode::ConstantBool(a > b))); return; }
+                        TokenType::LtEq    => { self.code.push(PendingOp::Ready(OpCode::ConstantBool(a <= b))); return; }
+                        TokenType::GtEq    => { self.code.push(PendingOp::Ready(OpCode::ConstantBool(a >= b))); return; }
+                        _ => {}
+                    }
+                }
+                // Constant folding: string + string
+                if let (TokenType::Plus, Expr::String(a), Expr::String(b)) = (&op, &*l, &*r) {
+                    let idx = self.intern(format!("{}{}", a, b));
+                    self.code.push(PendingOp::Ready(OpCode::StringConst(idx)));
+                    return;
+                }
                 if op == TokenType::And {
                     self.compile_expr(*l);
                     let jif_idx = self.code.len();
@@ -997,10 +1041,10 @@ fn builtin_impl(heap: &mut Heap, name: &str, args: Vec<Value>) -> Result<Value, 
 
 struct Handler {
     ip: usize,
-    current_code: Vec<OpCode>,
+    current_code: Rc<Vec<OpCode>>,
     locals: Vec<Value>,
     frames: Vec<Vec<Value>>,
-    call_stack: Vec<(usize, usize, Vec<OpCode>)>,
+    call_stack: Vec<(usize, usize, Rc<Vec<OpCode>>)>,
     closure_stack: Vec<Option<(Rc<RefCell<Vec<Value>>>, usize, usize)>>,
     stack: Vec<Value>,
 }
@@ -1012,11 +1056,13 @@ pub struct VM {
     frames: Vec<Vec<Value>>,
     functions: Vec<Vec<OpCode>>,
     functions_by_name: HashMap<String, u32>,
-    call_stack: Vec<(usize, usize, Vec<OpCode>)>,
+    call_stack: Vec<(usize, usize, Rc<Vec<OpCode>>)>,
     closure_stack: Vec<Option<(Rc<RefCell<Vec<Value>>>, usize, usize)>>,
     handlers: Vec<Handler>,
     string_pool_heap: Vec<u32>,
+    locals_pool: Vec<Vec<Value>>, // Recycles Vecs to eliminate heap allocation on calls
     pub heap: Heap,
+    pub silent: bool,
 }
 
 impl VM {
@@ -1025,12 +1071,36 @@ impl VM {
             stack: Vec::new(), locals: Vec::new(), globals: Vec::new(), frames: Vec::new(),
             functions: Vec::new(), functions_by_name: HashMap::new(),
             call_stack: Vec::new(), closure_stack: Vec::new(),
-            handlers: Vec::new(), string_pool_heap: Vec::new(),
+            handlers: Vec::new(), string_pool_heap: Vec::new(), locals_pool: Vec::new(),
             heap: Heap::new(),
+            silent: false,
         }
     }
 
     pub fn run(&mut self, code: Vec<OpCode>, funcs: Vec<Vec<OpCode>>, string_pool: Vec<String>, script_args: Vec<String>) -> Result<(), String> {
+        self.run_impl(code, funcs, string_pool, script_args, None)
+    }
+
+    pub fn run_profiled(
+        &mut self,
+        code: Vec<OpCode>,
+        funcs: Vec<Vec<OpCode>>,
+        string_pool: Vec<String>,
+        script_args: Vec<String>,
+    ) -> Result<crate::profiler::ProfileReport, String> {
+        let mut report = crate::profiler::ProfileReport::new();
+        self.run_impl(code, funcs, string_pool, script_args, Some(&mut report))?;
+        Ok(report)
+    }
+
+    fn run_impl(
+        &mut self,
+        code: Vec<OpCode>,
+        funcs: Vec<Vec<OpCode>>,
+        string_pool: Vec<String>,
+        script_args: Vec<String>,
+        mut report: Option<&mut crate::profiler::ProfileReport>,
+    ) -> Result<(), String> {
         self.functions = funcs;
         self.string_pool_heap = string_pool.into_iter()
             .map(|s| self.heap.alloc(HeapObject::String(s)))
@@ -1043,13 +1113,21 @@ impl VM {
         let args_idx = self.heap.alloc(HeapObject::Array(args_array));
         self.globals = vec![Value::array(args_idx)];
 
+        let silent = self.silent;
         let Self {
             stack, locals, globals, frames, functions, functions_by_name,
             call_stack, closure_stack, handlers, string_pool_heap, heap,
+            locals_pool, silent: _,
         } = self;
 
+        // Precompute Rc-wrapped code arrays once. Rc::clone is O(1) instead
+        // of O(bytecode_len) per Call/TryStart/Return — eliminates the
+        // dominant allocation source during deep call stacks.
+        let functions_rc: Vec<Rc<Vec<OpCode>>> = functions.drain(..).map(Rc::new).collect();
+        let main_code_rc: Rc<Vec<OpCode>> = Rc::new(code);
+
         let mut ip: usize = 0;
-        let mut current_code: Vec<OpCode> = code.clone();
+        let mut current_code: Rc<Vec<OpCode>> = Rc::clone(&main_code_rc);
 
         // FIX: Include frames, handlers, closure_stack, and string_pool_heap in roots
         macro_rules! roots { () => {{
@@ -1079,6 +1157,9 @@ impl VM {
 
         while ip < current_code.len() {
             let op = unsafe { current_code.get_unchecked(ip) };
+            if let Some(r) = report.as_deref_mut() {
+                r.on_instruction(op);
+            }
             match op {
                 OpCode::ConstantNumber(n) => stack.push(Value::number(*n)),
                 OpCode::ConstantBool(b) => stack.push(Value::bool(*b)),
@@ -1111,7 +1192,10 @@ impl VM {
                 OpCode::GtEq => { let b = stack.pop().unwrap_or(Value::null()); let a = stack.pop().unwrap_or(Value::null()); let r = if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) { x >= y } else if a.is_string() && b.is_string() { heap.get_string(a.payload()) >= heap.get_string(b.payload()) } else { false }; stack.push(Value::bool(r)); }
                 OpCode::Negate => { let v = stack.pop().unwrap_or(Value::null()); if let Some(n) = v.as_number() { stack.push(Value::number(-n)); } else { stack.push(Value::null()); } }
                 OpCode::Not => { let v = stack.pop().unwrap_or(Value::null()); if v.is_bool() { stack.push(Value::bool(!v.as_bool())); } else { stack.push(Value::null()); } }
-                OpCode::Print => { let v = stack.pop().unwrap_or(Value::null()); println!("{}", v.to_string_with_heap(heap)); }
+                OpCode::Print => {
+                    let v = stack.pop().unwrap_or(Value::null());
+                    if !silent { println!("{}", v.to_string_with_heap(heap)); }
+                }
 
                 OpCode::BinLocals(op, a, b) => {
                     let lv = unsafe { *locals.get_unchecked(*a as usize) };
@@ -1273,13 +1357,14 @@ impl VM {
                         let (name, _) = heap.get_struct(target.payload());
                         let full_name = format!("{}.{}", name, method);
                         if let Some(&func_idx) = functions_by_name.get(&full_name) {
-                            call_stack.push((ip, handlers.len(), current_code.clone()));
+                            call_stack.push((ip, handlers.len(), Rc::clone(&current_code)));
                             closure_stack.push(None);
-                            frames.push(std::mem::replace(locals, Vec::new()));
-                            let mut final_args = vec![target];
-                            final_args.extend(args);
-                            *locals = final_args;
-                            current_code = functions[func_idx as usize].clone();
+                            let mut new_frame = locals_pool.pop().unwrap_or_default();
+                            new_frame.clear();
+                            new_frame.push(target);
+                            new_frame.extend(args);
+                            frames.push(std::mem::replace(locals, new_frame));
+                            current_code = Rc::clone(&functions_rc[func_idx as usize]);
                             ip = 0; continue;
                         }
                     }
@@ -1290,20 +1375,27 @@ impl VM {
                     if func_val.is_function() {
                         let heap_obj = heap.get(func_val.payload()).clone();
                         if let HeapObject::CodeFunction(code_idx) = heap_obj {
-                            call_stack.push((ip, handlers.len(), current_code.clone()));
+                            call_stack.push((ip, handlers.len(), Rc::clone(&current_code)));
                             closure_stack.push(None);
-                            frames.push(std::mem::replace(locals, Vec::new()));
-                            let mut new_locals: Vec<Value> = Vec::with_capacity(*arg_count);
-                            for _ in 0..*arg_count { new_locals.push(stack.pop().unwrap_or(Value::null())); }
-                            *locals = new_locals;
-                            current_code = functions[code_idx as usize].clone();
+                            let mut new_frame = locals_pool.pop().unwrap_or_default();
+                            new_frame.clear();
+                            for _ in 0..*arg_count { new_frame.push(stack.pop().unwrap_or(Value::null())); }
+                            frames.push(std::mem::replace(locals, new_frame));
+                            if let Some(r) = report.as_deref_mut() {
+                                let mut name = format!("fn#{}", code_idx);
+                                for (n, idx) in functions_by_name.iter() {
+                                    if *idx == code_idx { name = n.clone(); break; }
+                                }
+                                r.push_frame(name);
+                            }
+                            current_code = Rc::clone(&functions_rc[code_idx as usize]);
                             ip = 0; continue;
                         }
                     } else if func_val.is_closure() {
                         let heap_obj = heap.get(func_val.payload()).clone();
                         if let HeapObject::Closure { func_idx, num_params, num_locals, captured } = heap_obj {
                             let cap_snapshot: Vec<Value> = { let b = captured.borrow(); b.iter().copied().collect() };
-                            call_stack.push((ip, handlers.len(), current_code.clone()));
+                            call_stack.push((ip, handlers.len(), Rc::clone(&current_code)));
                             closure_stack.push(Some((captured.clone(), num_params as usize, num_locals as usize)));
                             frames.push(std::mem::replace(locals, Vec::new()));
                             let mut new_locals: Vec<Value> = Vec::with_capacity(num_params as usize + num_locals as usize + cap_snapshot.len());
@@ -1311,14 +1403,72 @@ impl VM {
                             new_locals.resize(num_params as usize + num_locals as usize, Value::null());
                             new_locals.extend(cap_snapshot);
                             *locals = new_locals;
-                            current_code = functions[func_idx as usize].clone();
+                            if let Some(r) = report.as_deref_mut() {
+                                r.push_frame(format!("closure#{}", func_idx));
+                            }
+                            current_code = Rc::clone(&functions_rc[func_idx as usize]);
                             ip = 0; continue;
                         }
                     }
                 }
+                OpCode::CallGlobal(gslot, arg_count) => {
+                    let func_val = globals.get(*gslot as usize).copied().unwrap_or(Value::null());
+                    if func_val.is_function() {
+                        let heap_obj = heap.get(func_val.payload()).clone();
+                        if let HeapObject::CodeFunction(code_idx) = heap_obj {
+                            call_stack.push((ip, handlers.len(), Rc::clone(&current_code)));
+                            closure_stack.push(None);
+                            let mut new_frame = locals_pool.pop().unwrap_or_default();
+                            new_frame.clear();
+                            for _ in 0..*arg_count { new_frame.push(stack.pop().unwrap_or(Value::null())); }
+                            frames.push(std::mem::replace(locals, new_frame));
+                            if let Some(r) = report.as_deref_mut() {
+                                let mut name = format!("fn#{}", code_idx);
+                                for (n, idx) in functions_by_name.iter() {
+                                    if *idx == code_idx { name = n.clone(); break; }
+                                }
+                                r.push_frame(name);
+                            }
+                            current_code = Rc::clone(&functions_rc[code_idx as usize]);
+                            ip = 0; continue;
+                        }
+                    } else if func_val.is_closure() {
+                        let heap_obj = heap.get(func_val.payload()).clone();
+                        if let HeapObject::Closure { func_idx, num_params, num_locals, captured } = heap_obj {
+                            let cap_snapshot: Vec<Value> = { let b = captured.borrow(); b.iter().copied().collect() };
+                            call_stack.push((ip, handlers.len(), Rc::clone(&current_code)));
+                            closure_stack.push(Some((captured.clone(), num_params as usize, num_locals as usize)));
+                            let mut new_frame = locals_pool.pop().unwrap_or_default();
+                            new_frame.clear();
+                            for _ in 0..*arg_count { new_frame.push(stack.pop().unwrap_or(Value::null())); }
+                            new_frame.resize(num_params as usize + num_locals as usize, Value::null());
+                            new_frame.extend(cap_snapshot);
+                            frames.push(std::mem::replace(locals, new_frame));
+                            if let Some(r) = report.as_deref_mut() {
+                                r.push_frame(format!("closure#{}", func_idx));
+                            }
+                            current_code = Rc::clone(&functions_rc[func_idx as usize]);
+                            ip = 0; continue;
+                        }
+                    }
+                }
+                OpCode::PushLocalAddConst(slot, k) => {
+                    let v = locals.get(*slot as usize).copied().unwrap_or(Value::null());
+                    if let Some(n) = v.as_number() { stack.push(Value::number(n + *k)); }
+                    else { stack.push(Value::null()); }
+                }
+                OpCode::PushLocalSubConst(slot, k) => {
+                    let v = locals.get(*slot as usize).copied().unwrap_or(Value::null());
+                    if let Some(n) = v.as_number() { stack.push(Value::number(n - *k)); }
+                    else { stack.push(Value::null()); }
+                }
+
                 OpCode::Return => {
                     let ret_val = stack.pop().unwrap_or(Value::null());
                     if let Some((ret_ip, handlers_len, caller_code)) = call_stack.pop() {
+                        if let Some(r) = report.as_deref_mut() {
+                            r.pop_frame();
+                        }
                         handlers.truncate(handlers_len);
                         if let Some(Some((cap, np, nl))) = closure_stack.pop() {
                             let base = np + nl;
@@ -1327,7 +1477,8 @@ impl VM {
                                 if base + i < locals.len() { b[i] = locals[base + i]; }
                             }
                         }
-                        *locals = frames.pop().unwrap_or_default();
+                        let old_locals = std::mem::replace(locals, frames.pop().unwrap_or_default());
+                        locals_pool.push(old_locals); // Return the used frame to the pool
                         stack.push(ret_val);
                         current_code = caller_code;
                         ip = ret_ip;
@@ -1483,4 +1634,46 @@ pub fn load_bytecode(path: &str) -> Result<CompiledBundle, String> {
         return Err(format!("unsupported bytecode version: {} (expected 1)", bundle.version));
     }
     Ok(bundle)
+}
+
+// ===================== BINARY BYTECODE =====================
+
+const BIN_MAGIC: u8 = 0xBC;
+
+pub fn save_bytecode_bin(
+    path: &str,
+    code: Vec<OpCode>,
+    funcs: Vec<Vec<OpCode>>,
+    string_pool: Vec<String>,
+) -> Result<(), String> {
+    let bundle = CompiledBundle { version: 1, code, funcs, string_pool };
+    let mut bytes = Vec::with_capacity(256);
+    bytes.push(BIN_MAGIC);
+    let payload = bincode::serialize(&bundle).map_err(|e| e.to_string())?;
+    bytes.extend(payload);
+    std::fs::write(path, bytes).map_err(|e| e.to_string())
+}
+
+/// Loads either binary (`0xBC` magic) or JSON (backward compat) bytecode.
+pub fn load_bytecode_auto(path: &str) -> Result<CompiledBundle, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    if bytes.is_empty() {
+        return Err("empty bytecode file".to_string());
+    }
+    if bytes[0] == BIN_MAGIC {
+        let bundle: CompiledBundle = bincode::deserialize(&bytes[1..])
+            .map_err(|e| format!("corrupt binary bytecode: {}", e))?;
+        if bundle.version != 1 {
+            return Err(format!("unsupported bytecode version: {}", bundle.version));
+        }
+        Ok(bundle)
+    } else {
+        // Legacy JSON format
+        let bundle: CompiledBundle = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("parse: {}", e))?;
+        if bundle.version != 1 {
+            return Err(format!("unsupported bytecode version: {}", bundle.version));
+        }
+        Ok(bundle)
+    }
 }
