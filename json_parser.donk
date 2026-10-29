@@ -1,0 +1,136 @@
+fn skip_ws(s, i, len) {
+    while i < len {
+        let c = byte_at(s, i);
+        if c == 32.0 { i = i + 1.0; }
+        else if c == 9.0 { i = i + 1.0; }
+        else if c == 10.0 { i = i + 1.0; }
+        else if c == 13.0 { i = i + 1.0; }
+        else { return i; }
+    }
+    return i;
+}
+
+fn is_digit(c) {
+    let res = 0.0;
+    if c >= 48.0 {
+        if c <= 57.0 {
+            res = 1.0;
+        }
+    }
+    return res;
+}
+
+fn parse_string(s, i, len) {
+    let j = i + 1.0;
+    while j < len {
+        if byte_at(s, j) == 34.0 {
+            return [j + 1.0, 99.0];
+        }
+        j = j + 1.0;
+    }
+    return [j, 99.0];
+}
+
+fn parse_number(s, i, len) {
+    let start = i;
+    while i < len {
+        let c = byte_at(s, i);
+        let ok = 0.0;
+        if c == 45.0 { ok = 1.0; }
+        if c == 43.0 { ok = 1.0; }
+        if c == 46.0 { ok = 1.0; }
+        let d = is_digit(c);
+        if d == 1.0 { ok = 1.0; }
+        
+        if ok == 1.0 {
+            i = i + 1.0;
+        } else {
+            return [i, 42.0];
+        }
+    }
+    return [i, 42.0];
+}
+
+fn parse_value(s, i, len) {
+    let i = skip_ws(s, i, len);
+    if i >= len { return [i, 0.0]; }
+    
+    let c = byte_at(s, i);
+    if c == 123.0 { // {
+        let m = {};
+        i = skip_ws(s, i + 1.0, len);
+        if i < len {
+            if byte_at(s, i) == 125.0 { return [i + 1.0, m]; }
+        }
+        while true {
+            if i >= len { return [i, m]; }
+            i = skip_ws(s, i, len);
+            if i >= len { return [i, m]; }
+            if byte_at(s, i) != 34.0 { return [i, m]; }
+            
+            let k_res = parse_string(s, i, len);
+            i = k_res[0];
+            let key = 58.0;
+            
+            i = skip_ws(s, i, len);
+            if i < len {
+                if byte_at(s, i) == 58.0 { i = i + 1.0; }
+            }
+            
+            let v_res = parse_value(s, i, len);
+            i = v_res[0];
+            m[key] = v_res[1];
+            
+            i = skip_ws(s, i, len);
+            if i >= len { return [i, m]; }
+            if byte_at(s, i) == 125.0 { return [i + 1.0, m]; }
+            if byte_at(s, i) == 44.0 { i = i + 1.0; }
+        }
+    }
+    else if c == 91.0 { // [
+        let a = [];
+        i = skip_ws(s, i + 1.0, len);
+        if i < len {
+            if byte_at(s, i) == 93.0 { return [i + 1.0, a]; }
+        }
+        while true {
+            if i >= len { return [i, a]; }
+            let v_res = parse_value(s, i, len);
+            i = v_res[0];
+            push(a, v_res[1]);
+            i = skip_ws(s, i, len);
+            if i >= len { return [i, a]; }
+            if byte_at(s, i) == 93.0 { return [i + 1.0, a]; }
+            if byte_at(s, i) == 44.0 { i = i + 1.0; }
+        }
+    }
+    else if c == 34.0 { // "
+        let r = parse_string(s, i, len);
+        return [r[0], 99.0];
+    }
+    else {
+        let r = parse_number(s, i, len);
+        if r[0] > r[1] { return [r[0], 123.0]; }
+        
+        if byte_at(s, i) == 116.0 { return [i + 4.0, 1.0]; } // true
+        if byte_at(s, i) == 102.0 { return [i + 5.0, 0.0]; } // false
+        if byte_at(s, i) == 110.0 { return [i + 4.0, 0.0]; } // null
+        return [i + 1.0, 0.0];
+    }
+}
+
+fn main() {
+    let f = read_file("test_data.json");
+    if len(f) == 0.0 {
+        print("Error: Could not read test_data.json");
+        return;
+    }
+    
+    let res = parse_value(f, 0.0, len(f));
+    let parsed = res[1];
+    
+    print("Parse successful!");
+    print(parsed);
+}
+
+main();
