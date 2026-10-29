@@ -20,7 +20,7 @@ fn get_servers() -> &'static Mutex<HashMap<usize, TcpListener>> { SERVERS.get_or
 fn get_counter() -> &'static Mutex<usize> { COUNTER.get_or_init(|| Mutex::new(1)) }
 
 #[repr(C, u8)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum OpCode {
     ConstantNumber(f64),
     ConstantBool(bool),
@@ -698,7 +698,7 @@ fn is_builtin(name: &str) -> bool {
         "str" | "num" | "type" | "len" | "push" | "pop" | "keys"
         | "split" | "join" | "upper" | "lower" | "trim" | "replace" | "contains"
         | "str_eq" | "char_code" | "byte_at" | "byte_substr" | "bytes_to_str"
-        | "read_file" | "write_file" | "file_exists" | "list_dir" | "mkdir"
+        | "read_file" | "write_file" | "file_exists" | "is_dir" | "list_dir" | "mkdir" | "now"
         | "random" | "clear_screen" | "print_str" | "print_char" | "read_line" | "input"
         | "tcp_listen" | "tcp_accept" | "tcp_read" | "tcp_write" | "tcp_close" | "http_get" | "system"
     )
@@ -867,6 +867,19 @@ fn builtin_impl(heap: &mut Heap, name: &str, args: Vec<Value>) -> Result<Value, 
             Some(v) if v.is_string() => { let p = heap.get_string(v.payload()).clone(); Ok(Value::bool(Path::new(&p).exists())) }
             _ => Err("file_exists()".to_string()),
         },
+        "is_dir" => match args.get(0) {
+            Some(v) if v.is_string() => {
+                let p = heap.get_string(v.payload()).clone();
+                Ok(Value::bool(Path::new(&p).is_dir()))
+            }
+            _ => Err("is_dir() expects string".to_string()),
+        },
+        "now" => {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let secs = SystemTime::now().duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as f64).unwrap_or(0.0);
+            Ok(Value::number(secs))
+        }
         "list_dir" => {
             if let Some(v) = args.get(0) { if v.is_string() {
                 let p = heap.get_string(v.payload()).clone();
@@ -984,6 +997,7 @@ fn builtin_impl(heap: &mut Heap, name: &str, args: Vec<Value>) -> Result<Value, 
 
 struct Handler {
     ip: usize,
+    current_code: Vec<OpCode>,
     locals: Vec<Value>,
     frames: Vec<Vec<Value>>,
     call_stack: Vec<(usize, usize, Vec<OpCode>)>,
@@ -1323,6 +1337,7 @@ impl VM {
                 OpCode::TryStart(handler_ip) => {
                     handlers.push(Handler {
                         ip: *handler_ip,
+                        current_code: current_code.clone(),
                         locals: locals.clone(), frames: frames.clone(),
                         call_stack: call_stack.clone(), closure_stack: closure_stack.clone(), stack: stack.clone(),
                     });
@@ -1333,7 +1348,7 @@ impl VM {
                     if let Some(h) = handlers.pop() {
                         *locals = h.locals; *frames = h.frames; *call_stack = h.call_stack; *closure_stack = h.closure_stack;
                         *stack = h.stack; stack.push(exc);
-                        current_code = code.clone(); ip = h.ip; continue;
+                        current_code = h.current_code; ip = h.ip; continue;
                     } else {
                         return Err(format!("Uncaught exception: {}", exc.to_string_with_heap(heap)));
                     }
@@ -1438,4 +1453,34 @@ impl VM {
         }
         Ok(())
     }
+}
+
+// ===================== BYTECODE SERIALIZATION =====================
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct CompiledBundle {
+    pub version: u32,
+    pub code: Vec<OpCode>,
+    pub funcs: Vec<Vec<OpCode>>,
+    pub string_pool: Vec<String>,
+}
+
+pub fn save_bytecode(
+    path: &str,
+    code: Vec<OpCode>,
+    funcs: Vec<Vec<OpCode>>,
+    string_pool: Vec<String>,
+) -> Result<(), String> {
+    let bundle = CompiledBundle { version: 1, code, funcs, string_pool };
+    let json = serde_json::to_string_pretty(&bundle).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+pub fn load_bytecode(path: &str) -> Result<CompiledBundle, String> {
+    let data = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let bundle: CompiledBundle = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    if bundle.version != 1 {
+        return Err(format!("unsupported bytecode version: {} (expected 1)", bundle.version));
+    }
+    Ok(bundle)
 }

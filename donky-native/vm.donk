@@ -30,6 +30,8 @@ fn call_builtin(name, args) {
     if name == "type" { return type(args[0]); }
     if name == "contains" { return contains(args[0], args[1]); }
     if name == "is_null" { return args[0] == null; }
+    if name == "is_dir" { return is_dir(args[0]); }
+    if name == "now" { return now(); }
     throw "Unknown builtin: " + name;
 }
 

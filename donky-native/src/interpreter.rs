@@ -44,7 +44,7 @@ impl Environment {
     pub fn pop_scope(&mut self) { self.scopes.pop(); }
 }
 
-pub struct Interpreter { env: Environment, heap: Heap }
+pub struct Interpreter { env: Environment, pub heap: Heap }
 
 impl Interpreter {
     pub fn new(script_args: Vec<String>) -> Self {
@@ -208,7 +208,7 @@ impl Interpreter {
         }
     }
 
-    fn evaluate(&mut self, expr: Expr) -> Result<Value, String> {
+    pub fn evaluate(&mut self, expr: Expr) -> Result<Value, String> {
         match expr {
             Expr::Number(n) => Ok(Value::number(n)),
             Expr::String(s) => { let i = self.heap.alloc(HeapObject::String(s)); Ok(Value::string(i)) }
@@ -704,6 +704,19 @@ impl Interpreter {
                     return Ok(Value::bool(Path::new(&p).exists()));
                 }
                 return Err("file_exists()".to_string());
+            }
+            "is_dir" => {
+                if let Some(p_idx) = arg_vals.get(0).filter(|v| v.is_string()).map(|v| v.payload()) {
+                    let p = self.heap.get_string(p_idx).clone();
+                    return Ok(Value::bool(Path::new(&p).is_dir()));
+                }
+                return Err("is_dir() expects string".to_string());
+            }
+            "now" => {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let secs = SystemTime::now().duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs() as f64).unwrap_or(0.0);
+                return Ok(Value::number(secs));
             }
             "byte_at" => {
                 if arg_vals.len() >= 2 && arg_vals[0].is_string() {

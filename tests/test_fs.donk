@@ -1,0 +1,34 @@
+import "lib/fs.donk";
+
+// Set up a scratch dir
+let scratch = "tests/.scratch";
+mkdir(scratch);
+
+// Write a JSON roundtrip
+let obj = { "name": "test", "vals": [1, 2, 3], "ok": true };
+write_json(scratch + "/roundtrip.json", obj);
+
+let back = read_json(scratch + "/roundtrip.json");
+assert_eq(back["name"], "test");
+assert_eq(back["ok"], true);
+assert_arr_eq(back["vals"], [1, 2, 3]);
+
+// Text roundtrip via lines
+write_lines(scratch + "/lines.txt", ["alpha", "beta", "gamma"]);
+let lines = read_lines(scratch + "/lines.txt");
+assert_eq(len(lines), 3);
+assert_eq(lines[0], "alpha");
+assert_eq(lines[2], "gamma");
+
+// Directory walking
+let files = walk_dir(scratch);
+assert_true(len(files) >= 2);
+
+// Filtered walk
+let json_files = walk_dir_filtered(scratch, ".json");
+assert_true(len(json_files) >= 1);
+
+// is_file / is_dir basics
+assert_true(is_dir(scratch));
+assert_true(is_file(scratch + "/roundtrip.json"));
+assert_false(is_dir(scratch + "/roundtrip.json"));

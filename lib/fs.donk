@@ -1,0 +1,73 @@
+// lib/fs.donk — filesystem helpers built on read_file/write_file/list_dir/is_dir
+
+import "lib/json.donk";
+
+fn is_file(path) -> bool {
+    return file_exists(path) && !is_dir(path);
+}
+
+fn read_json(path) {
+    return json_parse(read_file(path));
+}
+
+fn write_json(path, value) {
+    write_file(path, json_stringify(value));
+    return null;
+}
+
+fn copy_file(src, dst) {
+    write_file(dst, read_file(src));
+    return null;
+}
+
+// Recursively collect every file path under `path`.
+// Returns paths using "/" separators regardless of platform.
+fn walk_dir(path) -> array {
+    let out = [];
+    _walk_into(path, out);
+    return out;
+}
+
+fn _walk_into(dir, out) {
+    let entries = list_dir(dir);
+    for name in entries {
+        let full = dir + "/" + name;
+        if is_dir(full) {
+            _walk_into(full, out);
+        } else {
+            push(out, full);
+        }
+    }
+}
+
+// Only files matching a suffix are returned. Use "" to include everything.
+fn walk_dir_filtered(path, suffix) -> array {
+    let all = walk_dir(path);
+    if suffix == "" { return all; }
+    let out = [];
+    for p in all {
+        let tail_len = len(suffix);
+        if len(p) >= tail_len {
+            if byte_substr(p, len(p) - tail_len, len(p)) == suffix {
+                push(out, p);
+            }
+        }
+    }
+    return out;
+}
+
+// Read a file as an array of lines (no trailing newline included).
+fn read_lines(path) -> array {
+    let content = read_file(path);
+    let parts = split(content, "\n");
+    if len(parts) > 0 && parts[len(parts) - 1] == "" {
+        pop(parts);
+    }
+    return parts;
+}
+
+// Write an array of lines back to a file, joined by "\n".
+fn write_lines(path, lines) {
+    write_file(path, join(lines, "\n"));
+    return null;
+}

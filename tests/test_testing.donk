@@ -1,0 +1,20 @@
+import "lib/testing.donk";
+
+// Assertions that should pass
+assert_eq(1 + 1, 2);
+assert_true(true);
+assert_false(false);
+assert_neq(1, 2);
+assert_near(3.14159, 3.1416, 0.001);
+assert_arr_eq([1, 2, 3], [1, 2, 3]);
+assert_contains("hello world", "world");
+
+// Assertion that should throw — wrapped in a nested closure
+fn will_throw() { assert_eq(1, 2); }
+assert_throws(will_throw);
+
+// Suite helpers
+suite_begin();
+suite_run("math works", fn() { assert_eq(2 + 2, 4); });
+suite_run("arrays work", fn() { assert_arr_eq([1], [1]); });
+suite_summary();

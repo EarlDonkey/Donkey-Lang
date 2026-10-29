@@ -1,0 +1,107 @@
+// lib/testing.donk — assertion helpers. Tests PASS iff the file completes without throwing.
+// Works with `donky-native test` (walks tests/*.donk) or `donky-native run file.donk`.
+
+fn assert_true(value) {
+    if value != true {
+        throw "assert_true: expected true, got " + str(value);
+    }
+    return null;
+}
+
+fn assert_false(value) {
+    if value != false {
+        throw "assert_false: expected false, got " + str(value);
+    }
+    return null;
+}
+
+fn assert_eq(actual, expected) {
+    if actual != expected {
+        throw "assert_eq: expected " + str(expected) + ", got " + str(actual);
+    }
+    return null;
+}
+
+fn assert_neq(actual, unexpected) {
+    if actual == unexpected {
+        throw "assert_neq: got unexpected " + str(actual);
+    }
+    return null;
+}
+
+fn assert_near(actual, expected, tolerance) {
+    let diff = actual - expected;
+    if diff < 0 { diff = -diff; }
+    if diff > tolerance {
+        throw "assert_near: expected ~" + str(expected) + " (+/-" + str(tolerance) + "), got " + str(actual);
+    }
+    return null;
+}
+
+fn assert_arr_eq(actual, expected) {
+    if len(actual) != len(expected) {
+        throw "assert_arr_eq: expected length " + str(len(expected)) + ", got " + str(len(actual));
+    }
+    let i = 0;
+    while i < len(actual) {
+        if actual[i] != expected[i] {
+            throw "assert_arr_eq: mismatch at index " + str(i) + " (expected " + str(expected[i]) + ", got " + str(actual[i]) + ")";
+        }
+        i = i + 1;
+    }
+    return null;
+}
+
+fn assert_contains(haystack, needle) {
+    if !contains(haystack, needle) {
+        throw "assert_contains: " + str(haystack) + " does not contain " + str(needle);
+    }
+    return null;
+}
+
+fn assert_throws(f) {
+    let threw = false;
+    try {
+        f();
+    } catch e {
+        threw = true;
+    }
+    if !threw {
+        throw "assert_throws: expected an exception, none thrown";
+    }
+    return null;
+}
+
+fn fail(msg) {
+    throw "fail: " + msg;
+}
+
+// Track pass/fail counters inside a suite (optional helper for verbose runs)
+let _test_counts = { "pass": 0, "fail": 0 };
+
+fn suite_begin() {
+    _test_counts["pass"] = 0;
+    _test_counts["fail"] = 0;
+    return null;
+}
+
+fn suite_run(name, f) {
+    try {
+        f();
+        _test_counts["pass"] = _test_counts["pass"] + 1;
+        print("  [PASS] " + name);
+    } catch e {
+        _test_counts["fail"] = _test_counts["fail"] + 1;
+        print("  [FAIL] " + name + " — " + str(e));
+    }
+    return null;
+}
+
+fn suite_summary() -> number {
+    print("");
+    print("Passed: " + str(_test_counts["pass"]) + ", Failed: " + str(_test_counts["fail"]));
+    if _test_counts["fail"] > 0 {
+        throw "suite failures: " + str(_test_counts["fail"]);
+    }
+    return _test_counts["pass"];
+}

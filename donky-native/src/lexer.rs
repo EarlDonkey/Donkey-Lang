@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TokenType {
     Number, String, StringInterp, Ident,
     Let, Fn, If, Else, While, For, In, Return, Print, True, False, Div, Break, Continue, Try, Catch, Throw, Import, Struct, Asm, Match,
