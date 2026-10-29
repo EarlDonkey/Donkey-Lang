@@ -21,6 +21,8 @@ cranelift-jit = "0.119"
 cranelift-frontend = "0.119"
 cranelift-native = "0.119"
 cranelift = "0.119"
+cranelift-object = "0.119"
+
 
 [profile.release]
 opt-level = "z"  # Optimize for size

@@ -1,8 +1,11 @@
-fn fib(n) {
-    if n < 2.0 {
-        return n;
-    }
-    return fib(n - 1.0) + fib(n - 2.0);
-}
+let my_arr = [10.0, 20.0, 30.0];
+my_arr[1] = 99.0;
+print(my_arr);
 
-print(fib(20.0));
+let user = {
+    "name": "Agent",
+    "id": 42.0,
+    "scores": my_arr
+};
+
+print(user);
