@@ -25,7 +25,7 @@ void print_value(uint64_t val) {
         if (d == (long long)d) printf("%lld", (long long)d);
         else printf("%g", d);
     } else if (get_tag(val) == TAG_STRING) {
-        printf("\"%s\"", (char*)as_index(val));
+        printf("\"%s\"", (char*)as_index(val)); // Print with quotes for JSON output
     } else if (get_tag(val) == TAG_ARRAY) {
         Array* arr = (Array*)as_index(val);
         printf("[");
@@ -154,6 +154,25 @@ uint64_t donky_byte_at(uint64_t s_val, uint64_t i_val) {
         if (i < strlen(s)) return make_number((double)(unsigned char)s[i]);
     }
     return make_number(-1.0);
+}
+
+uint64_t donky_substr(uint64_t s_val, uint64_t start_val, uint64_t end_val) {
+    if (get_tag(s_val) != TAG_STRING) return 0;
+    char* s = (char*)as_index(s_val);
+    size_t start = (size_t)as_number(start_val);
+    size_t end = (size_t)as_number(end_val);
+    size_t len = strlen(s);
+    
+    if (start > len) start = len;
+    if (end > len) end = len;
+    if (start > end) start = end;
+    
+    size_t sub_len = end - start;
+    char* buf = malloc(sub_len + 1);
+    memcpy(buf, s + start, sub_len);
+    buf[sub_len] = 0;
+    
+    return TAG_BASE | (TAG_STRING << 48) | (uint64_t)buf;
 }
 
 uint64_t donky_len(uint64_t val) {

@@ -26,6 +26,7 @@ pub struct RuntimeFuncs {
     pub add_id: FuncId,
     pub eq_id: FuncId,
     pub byte_at_id: FuncId,
+    pub substr_id: FuncId,
 }
 
 pub struct AotCompiler {
@@ -77,6 +78,7 @@ impl AotCompiler {
             add_id: declare("donky_add", &[types::I64, types::I64], Some(types::I64)),
             eq_id: declare("donky_eq", &[types::I64, types::I64], Some(types::I64)),
             byte_at_id: declare("donky_byte_at", &[types::I64, types::I64], Some(types::I64)),
+            substr_id: declare("donky_substr", &[types::I64, types::I64, types::I64], Some(types::I64)),
         };
         
         AotCompiler {
@@ -290,7 +292,7 @@ impl AotCompiler {
 
                 builder.switch_to_block(exit_block);
                 builder.seal_block(exit_block);
-                builder.seal_block(header_block); // Correctly sealed at the end
+                builder.seal_block(header_block);
                 false
             }
             Stmt::For(var_name, iter_expr, body) => {
@@ -362,7 +364,7 @@ impl AotCompiler {
 
                 builder.switch_to_block(exit_block);
                 builder.seal_block(exit_block);
-                builder.seal_block(header_block); // Correctly sealed at the end
+                builder.seal_block(header_block);
                 false
             }
             Stmt::Match(target, cases, else_block) => {
@@ -476,6 +478,7 @@ impl AotCompiler {
                         "num" => runtime.num_id,
                         "read_file" => runtime.read_file_id,
                         "byte_at" => runtime.byte_at_id,
+                        "substr" => runtime.substr_id,
                         _ => panic!("Unknown builtin function: {}", name),
                     };
                     
