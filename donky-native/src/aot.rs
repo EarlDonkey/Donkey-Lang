@@ -23,6 +23,7 @@ pub struct RuntimeFuncs {
     pub str_id: FuncId,
     pub num_id: FuncId,
     pub read_file_id: FuncId,
+    pub add_id: FuncId,
 }
 
 pub struct AotCompiler {
@@ -70,6 +71,7 @@ impl AotCompiler {
             str_id: declare("donky_str", &[types::I64], Some(types::I64)),
             num_id: declare("donky_num", &[types::I64], Some(types::I64)),
             read_file_id: declare("donky_read_file", &[types::I64], Some(types::I64)),
+            add_id: declare("donky_add", &[types::I64, types::I64], Some(types::I64)),
         };
         
         AotCompiler {
@@ -101,7 +103,7 @@ impl AotCompiler {
             }
         }
 
-        // 3. DEFINE MAIN (Exported as donky_main for the C runtime)
+        // 3. DEFINE MAIN
         let sig = self.module.make_signature();
         let main_id = self.module.declare_function("donky_main", Linkage::Export, &sig).unwrap();
         self.ctx.func.signature = sig;
@@ -285,6 +287,70 @@ impl AotCompiler {
                 builder.seal_block(header_block);
                 false
             }
+            Stmt::For(var_name, iter_expr, body) => {
+                // Desugar `for x in arr` into a while loop
+                let iter_var_name = format!("__iter_{}", fctx.variables.len());
+                let idx_var_name = format!("__idx_{}", fctx.variables.len());
+                
+                let iter_val = Self::compile_expr(builder, module, runtime, user_funcs, fctx, iter_expr);
+                let iter_var = Variable::new(fctx.variables.len());
+                builder.declare_var(iter_var, types::I64);
+                builder.def_var(iter_var, iter_val);
+                fctx.variables.insert(iter_var_name.clone(), iter_var);
+
+                let zero = builder.ins().iconst(types::I64, 0.0_f64.to_bits() as i64);
+                let idx_var = Variable::new(fctx.variables.len());
+                builder.declare_var(idx_var, types::I64);
+                builder.def_var(idx_var, zero);
+                fctx.variables.insert(idx_var_name.clone(), idx_var);
+
+                let header_block = builder.create_block();
+                let body_block = builder.create_block();
+                let exit_block = builder.create_block();
+
+                builder.ins().jump(header_block, &[]);
+
+                builder.switch_to_block(header_block);
+                
+                let len_func = module.declare_func_in_func(runtime.len_id, builder.func);
+                let iter_h = builder.use_var(iter_var);
+                let len_call = builder.ins().call(len_func, &[iter_h]);
+                let len_val = builder.inst_results(len_call)[0];
+                
+                let idx_h = builder.use_var(idx_var);
+                let idx_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), idx_h);
+                let len_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), len_val);
+                let cond = builder.ins().fcmp(FloatCC::LessThan, idx_f64, len_f64);
+                builder.ins().brif(cond, body_block, &[], exit_block, &[]);
+
+                builder.switch_to_block(body_block);
+                builder.seal_block(body_block);
+                
+                let get_func = module.declare_func_in_func(runtime.index_get_id, builder.func);
+                let item_call = builder.ins().call(get_func, &[iter_h, idx_h]);
+                let item_val = builder.inst_results(item_call)[0];
+                
+                let loop_var = Variable::new(fctx.variables.len());
+                builder.declare_var(loop_var, types::I64);
+                builder.def_var(loop_var, item_val);
+                fctx.variables.insert(var_name.clone(), loop_var);
+
+                let term = Self::compile_stmt(builder, module, runtime, user_funcs, fctx, body);
+                if !term {
+                    let one = builder.ins().iconst(types::I64, 1.0_f64.to_bits() as i64);
+                    let add_func = module.declare_func_in_func(runtime.add_id, builder.func);
+                    let add_call = builder.ins().call(add_func, &[idx_h, one]);
+                    let next_idx = builder.inst_results(add_call)[0];
+                    builder.def_var(idx_var, next_idx);
+                    
+                    builder.ins().jump(header_block, &[]);
+                }
+
+                builder.switch_to_block(exit_block);
+                builder.seal_block(exit_block);
+                builder.seal_block(header_block);
+                false
+            }
             Stmt::Block(stmts) => {
                 for s in stmts {
                     if Self::compile_stmt(builder, module, runtime, user_funcs, fctx, s) { return true; }
@@ -396,9 +462,6 @@ impl AotCompiler {
                 let lhs = Self::compile_expr(builder, module, runtime, user_funcs, fctx, left);
                 let rhs = Self::compile_expr(builder, module, runtime, user_funcs, fctx, right);
                 
-                let a_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), lhs);
-                let b_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), rhs);
-                
                 let cmp = match op {
                     TokenType::EqEq => Some(FloatCC::Equal),
                     TokenType::NotEq => Some(FloatCC::NotEqual),
@@ -410,19 +473,39 @@ impl AotCompiler {
                 };
 
                 if let Some(cc) = cmp {
+                    let a_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), lhs);
+                    let b_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), rhs);
                     let bool_val = builder.ins().fcmp(cc, a_f64, b_f64);
                     let int_val = builder.ins().uextend(types::I64, bool_val);
                     let f64_val = builder.ins().fcvt_from_uint(types::F64, int_val);
                     builder.ins().bitcast(types::I64, MemFlags::new(), f64_val)
                 } else {
-                    let res = match op {
-                        TokenType::Plus => builder.ins().fadd(a_f64, b_f64),
-                        TokenType::Minus => builder.ins().fsub(a_f64, b_f64),
-                        TokenType::Star => builder.ins().fmul(a_f64, b_f64),
-                        TokenType::Slash => builder.ins().fdiv(a_f64, b_f64),
+                    match op {
+                        TokenType::Plus => {
+                            let add_func = module.declare_func_in_func(runtime.add_id, builder.func);
+                            let call = builder.ins().call(add_func, &[lhs, rhs]);
+                            builder.inst_results(call)[0]
+                        }
+                        TokenType::Minus => {
+                            let a = builder.ins().bitcast(types::F64, MemFlags::new(), lhs);
+                            let b = builder.ins().bitcast(types::F64, MemFlags::new(), rhs);
+                            let res = builder.ins().fsub(a, b);
+                            builder.ins().bitcast(types::I64, MemFlags::new(), res)
+                        }
+                        TokenType::Star => {
+                            let a = builder.ins().bitcast(types::F64, MemFlags::new(), lhs);
+                            let b = builder.ins().bitcast(types::F64, MemFlags::new(), rhs);
+                            let res = builder.ins().fmul(a, b);
+                            builder.ins().bitcast(types::I64, MemFlags::new(), res)
+                        }
+                        TokenType::Slash => {
+                            let a = builder.ins().bitcast(types::F64, MemFlags::new(), lhs);
+                            let b = builder.ins().bitcast(types::F64, MemFlags::new(), rhs);
+                            let res = builder.ins().fdiv(a, b);
+                            builder.ins().bitcast(types::I64, MemFlags::new(), res)
+                        }
                         _ => panic!("Unsupported binary op"),
-                    };
-                    builder.ins().bitcast(types::I64, MemFlags::new(), res)
+                    }
                 }
             }
             _ => panic!("Unsupported expression in native codegen"),

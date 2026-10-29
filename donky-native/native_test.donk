@@ -1,17 +1,9 @@
-let my_arr = [10.0, 20.0];
-push(my_arr, 30.0);
-print(len(my_arr));
+let fruits = ["apple", "banana", "cherry"];
+let greeting = "I have ";
 
-let last = pop(my_arr);
-print(last);
-print(my_arr);
+for fruit in fruits {
+    print("Fruit: " + fruit);
+    greeting = greeting + fruit + " ";
+}
 
-let s = str(42.0);
-print(s);
-
-// Using the correct relative path from where donky_app.exe runs
-let f = read_file("donky-native/native_test.donk");
-print(len(f));
-
-let n = num("123.45");
-print(n + 1.0);
+print(greeting);

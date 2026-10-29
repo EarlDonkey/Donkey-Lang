@@ -180,7 +180,7 @@ uint64_t donky_array_push(uint64_t arr_val, uint64_t val) {
         arr->data = realloc(arr->data, arr->cap * sizeof(uint64_t));
     }
     arr->data[arr->len++] = val;
-    return 0; // Return null
+    return 0;
 }
 
 uint64_t donky_alloc_map() {
@@ -230,9 +230,22 @@ uint64_t donky_index_set(uint64_t target, uint64_t index, uint64_t val) {
     return 0;
 }
 
-// ==========================================
-// STANDARD LIBRARY BUILTINS
-// ==========================================
+uint64_t donky_add(uint64_t a, uint64_t b) {
+    if (is_number(a) && is_number(b)) {
+        return make_number(as_number(a) + as_number(b));
+    }
+    if (get_tag(a) == TAG_STRING && get_tag(b) == TAG_STRING) {
+        char* s1 = (char*)as_index(a);
+        char* s2 = (char*)as_index(b);
+        size_t len1 = strlen(s1);
+        size_t len2 = strlen(s2);
+        char* buf = malloc(len1 + len2 + 1);
+        strcpy(buf, s1);
+        strcat(buf, s2);
+        return TAG_BASE | (TAG_STRING << 48) | (uint64_t)buf;
+    }
+    return 0;
+}
 
 uint64_t donky_len(uint64_t val) {
     if (get_tag(val) == TAG_ARRAY) {
@@ -256,7 +269,7 @@ uint64_t donky_pop(uint64_t arr_val) {
             return arr->data[--arr->len];
         }
     }
-    return 0; // null
+    return 0;
 }
 
 uint64_t donky_str(uint64_t val) {
@@ -264,9 +277,9 @@ uint64_t donky_str(uint64_t val) {
     if (is_number(val)) {
         double d = as_number(val);
         if (d == (long long)d) sprintf(buf, "%lld", (long long)d);
-        else sprintf(buf, "%f", d);
+        else sprintf(buf, "%g", d);
     } else if (get_tag(val) == TAG_STRING) {
-        return val; // already a string
+        return val;
     } else if (get_tag(val) == TAG_ARRAY) {
         strcpy(buf, "[array]");
     } else if (get_tag(val) == TAG_MAP) {
@@ -303,9 +316,6 @@ uint64_t donky_read_file(uint64_t path_val) {
     return res;
 }
 
-// ==========================================
-// ENTRY POINT
-// ==========================================
 int main() {
     extern void donky_main();
     donky_main();
