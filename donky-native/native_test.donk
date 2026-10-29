@@ -1,0 +1,7 @@
+let x = 10.0;
+let y = 20.0;
+let z = x + y * 2.0;
+print(z);
+
+let a = z / 5.0;
+print(a);

@@ -7,6 +7,7 @@ mod heap;
 mod package;
 mod repl;
 mod profiler;
+mod codegen;
 
 use std::env;
 use std::fs;
@@ -60,6 +61,34 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        "build-native" => {
+            if args.len() < 3 {
+                eprintln!("Usage: donky-native build-native <file.donk>");
+                return;
+            }
+            let path = &args[2];
+            let source = match fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Runtime Error: build-native: {}", e);
+                    return;
+                }
+            };
+            let tokens = match lexer::Lexer::new(&source).tokenize() {
+                Ok(t) => t,
+                Err(e) => { eprintln!("Lex Error: {}", e); return; }
+            };
+            let ast = match parser::Parser::new(tokens).parse() {
+                Ok(a) => a,
+                Err(e) => { eprintln!("Parse Error: {}", e); return; }
+            };
+            
+            let mut compiler = codegen::NativeCompiler::new();
+            println!("Compiling natively...");
+            let start = std::time::Instant::now();
+            compiler.compile_and_run(&ast);
+            println!("Native execution finished in {:?}", start.elapsed());
+        }
         "build" => {
             if args.len() < 3 {
                 eprintln!("Usage: donky-native build <file.donk>");
@@ -71,7 +100,7 @@ fn main() {
         }
         "run" | "vm" => {
             if args.len() < 3 {
-                eprintln!("Usage: donky-native run <file.donk|file.bc> [args...]");
+                eprintln!("Usage: donky-native run <file.donk|file.donk.bc> [args...]");
                 return;
             }
             let script_args: Vec<String> = args[3..].to_vec();
@@ -94,6 +123,7 @@ fn print_usage() {
     println!("  donky-native <file.donk>                 tree-walker (legacy)");
     println!("  donky-native run <file.donk|file.bc>     VM (default)");
     println!("  donky-native build <file.donk>           compile to <file.donk.bc>");
+    println!("  donky-native build-native <file.donk>    compile to native machine code (JIT)");
     println!("  donky-native test [dir|file]             run tests (default: ./tests)");
     println!("  donky-native bench [dir]                 benchmark (default: ./bench)");
     println!("  donky-native profile <file.donk>         opcode profile + folded stacks");
@@ -244,21 +274,21 @@ fn cmd_bench(arg: Option<&str>) -> Result<(), String> {
         let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
         let source = fs::read_to_string(p).map_err(|e| e.to_string())?;
 
-        // ---- Warmup + Profile (get exact op/call counts) ----
-        let mut total_ops = 0u64;
-        let mut total_calls = 0u64;
-        {
+        // 1. Get Profile Stats exactly ONCE
+        let (total_ops, total_calls) = {
             let toks = lexer::Lexer::new(&source).tokenize()?;
             let ast = parser::Parser::new(toks).parse()?;
             let (code, funcs, pool) = vm::Compiler::new().compile(ast);
             let mut m = vm::VM::new();
             m.silent = true;
             let report = m.run_profiled(code, funcs, pool, vec![])?;
-            total_ops = report.total_instructions;
-            total_calls = report.call_counts.values().sum();
-        }
+            (
+                report.total_instructions,
+                report.call_counts.values().sum::<u64>(),
+            )
+        };
 
-        // ---- Compile-only ----
+        // 2. Compile Only
         let t = Instant::now();
         for _ in 0..ITERS {
             let toks = lexer::Lexer::new(&source).tokenize()?;
@@ -267,7 +297,7 @@ fn cmd_bench(arg: Option<&str>) -> Result<(), String> {
         }
         let compile_ms = t.elapsed().as_secs_f64() * 1000.0 / ITERS as f64;
 
-        // ---- Run from source ----
+        // 3. Run from Source
         let t = Instant::now();
         for _ in 0..ITERS {
             let toks = lexer::Lexer::new(&source).tokenize()?;
@@ -279,13 +309,12 @@ fn cmd_bench(arg: Option<&str>) -> Result<(), String> {
         }
         let run_ms = t.elapsed().as_secs_f64() * 1000.0 / ITERS as f64;
 
-        // Calculate pure execution time by subtracting compile time
         let exec_only_ms = (run_ms - compile_ms).max(0.0);
         
         let ns_per_op = if total_ops > 0 { (exec_only_ms * 1_000_000.0) / (total_ops as f64) } else { 0.0 };
         let ns_per_call = if total_calls > 0 { (exec_only_ms * 1_000_000.0) / (total_calls as f64) } else { 0.0 };
 
-        // ---- Build once, run .bc ----
+        // 4. Build Once, Run .bc
         let toks = lexer::Lexer::new(&source).tokenize()?;
         let ast = parser::Parser::new(toks).parse()?;
         let (code, funcs, pool) = vm::Compiler::new().compile(ast);

@@ -236,7 +236,7 @@ pub struct Compiler {
 
 impl Compiler {
     pub fn new() -> Self {
-        let mut c = Compiler {
+        let c = Compiler {
             code: Vec::new(), locals: HashMap::new(), next_local: 0, num_params: 0,
             upvalues: Rc::new(RefCell::new(UpvalueState::default())),
             captured_names: Rc::new(RefCell::new(Vec::new())),
