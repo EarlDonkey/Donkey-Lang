@@ -1,6 +1,4 @@
 // vm.donk — Self-Hosted Donky Virtual Machine
-// Refactored: run_bytecode_capture() collects Print output into a string
-// so the playground can serve compiled code without stdout bleed.
 
 fn eval_op(op, a, b) {
     if op == "Plus" { return a + b; }
@@ -36,20 +34,21 @@ fn call_builtin(name, args) {
 }
 
 fn run_bytecode(bytecode, script_args) {
-    _run_bytecode_impl(bytecode, script_args, null);
+    _run_bytecode_impl(bytecode, script_args, null, 100000000);
 }
 
 fn run_bytecode_capture(bytecode, script_args) -> string {
     let sink = [];
-    _run_bytecode_impl(bytecode, script_args, sink);
+    _run_bytecode_impl(bytecode, script_args, sink, 5000000);
     return join(sink, "\n");
 }
 
-fn _run_bytecode_impl(bytecode, script_args, output_sink) {
+fn _run_bytecode_impl(bytecode, script_args, output_sink, max_steps) {
     let stack = [];
     let locals = {};
     let globals = {};
     let call_stack = [];
+    let steps = 0;
 
     globals["args"] = script_args;
 
@@ -57,6 +56,11 @@ fn _run_bytecode_impl(bytecode, script_args, output_sink) {
     let len_bc = len(bytecode);
 
     while ip < len_bc {
+        steps = steps + 1;
+        if steps > max_steps {
+            throw "Execution limit exceeded (" + str(max_steps) + " steps) — possible infinite loop";
+        }
+
         let instruction = bytecode[ip];
         let parts = split(instruction, " ");
         let op = parts[0];

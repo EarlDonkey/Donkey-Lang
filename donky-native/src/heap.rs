@@ -76,10 +76,8 @@ impl Value {
     #[inline] pub fn is_function(self) -> bool { self.is_tagged() && self.tag() == Self::TAG_FUNCTION }
     #[inline] pub fn is_closure(self) -> bool { self.is_tagged() && self.tag() == Self::TAG_CLOSURE }
 
-    /// Unconditional raw-bits read. Use only when you already know it's a Number.
     #[inline] pub fn as_f64(self) -> f64 { f64::from_bits(self.0) }
 
-    /// **The one that was missing.** Returns `Some(f64)` iff this is a Number.
     #[inline] pub fn as_number(self) -> Option<f64> {
         if self.is_number() { Some(f64::from_bits(self.0)) } else { None }
     }
@@ -105,14 +103,53 @@ impl Value {
     }
 
     pub fn to_string_with_heap(self, heap: &Heap) -> String {
+        self.render(heap, 0)
+    }
+
+    fn render(self, heap: &Heap, depth: usize) -> String {
+        const MAX_DEPTH: usize = 8;
         match self.kind() {
             ValueKind::Number(n) => if n.fract() == 0.0 { format!("{:.0}", n) } else { n.to_string() },
             ValueKind::Bool(b) => b.to_string(),
             ValueKind::Null => "null".to_string(),
             ValueKind::String(idx) => heap.get_string(idx).clone(),
-            ValueKind::Array(idx) => format!("<array:{}>", idx),
-            ValueKind::Map(idx) => format!("<map:{}>", idx),
-            ValueKind::Struct(idx) => format!("<struct:{}>", idx),
+            ValueKind::Array(idx) => {
+                if depth >= MAX_DEPTH { return "[...]".to_string(); }
+                let items: Vec<String> = heap.get_array(idx).iter()
+                    .map(|v| v.render(heap, depth + 1))
+                    .collect();
+                format!("[{}]", items.join(", "))
+            }
+            ValueKind::Map(idx) => {
+                if depth >= MAX_DEPTH { return "{...}".to_string(); }
+                let mut entries: Vec<(String, String)> = heap.get_map(idx).iter()
+                    .map(|(k, v)| {
+                        let key_str = match k {
+                            MapKey::String(s) => format!("\"{}\"", s),
+                            MapKey::Number(n) => format!("{}", f64::from_bits(*n as u64)),
+                            MapKey::Bool(b) => b.to_string(),
+                        };
+                        (key_str, v.render(heap, depth + 1))
+                    })
+                    .collect();
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                let parts: Vec<String> = entries.into_iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                format!("{{{}}}", parts.join(", "))
+            }
+            ValueKind::Struct(idx) => {
+                if depth >= MAX_DEPTH { return "<struct:{...}>".to_string(); }
+                let (name, fields) = heap.get_struct(idx);
+                let mut entries: Vec<(String, String)> = fields.iter()
+                    .map(|(k, v)| (k.clone(), v.render(heap, depth + 1)))
+                    .collect();
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                let parts: Vec<String> = entries.into_iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                format!("{}{{{}}}", name, parts.join(", "))
+            }
             ValueKind::Function(_) | ValueKind::Closure(_) => "<fn>".to_string(),
         }
     }
@@ -218,7 +255,9 @@ impl Heap {
             }
         }
         self.next_gc = std::cmp::max(1024, self.objects.len() * 2);
-        println!("[GC] Swept {} objects. Heap size: {}", freed, self.objects.len());
+        if std::env::var("DONKY_GC_LOG").is_ok() {
+            println!("[GC] Swept {} objects. Heap size: {}", freed, self.objects.len());
+        }
     }
 
     fn mark_value(&mut self, v: Value) {

@@ -1,5 +1,4 @@
 // lexer.donk — Self-Hosted Donky Lexer
-// Usage: .\target\release\donky-native.exe vm lexer.donk <file.donk>
 
 struct Token {
     type: string,
@@ -26,16 +25,20 @@ fn tokenize(source) -> array {
     let col = 1;
     let len = len(source);
 
+    // Skip UTF-8 BOM (EF BB BF) if present — Windows editors often write one
+    if len >= 3 && byte_at(source, 0) == 239 && byte_at(source, 1) == 187 && byte_at(source, 2) == 191 {
+        i = 3;
+        col = 4;
+    }
+
     while i < len {
         let c = byte_at(source, i);
         
-        // Whitespace
         if c == 32 || c == 9 || c == 13 { 
             i = i + 1; col = col + 1;
         } else if c == 10 { 
             i = i + 1; line = line + 1; col = 1;
         } 
-        // Comments (//)
         else if c == 47 && i + 1 < len && byte_at(source, i + 1) == 47 { 
             while i < len && byte_at(source, i) != 10 {
                 i = i + 1; col = col + 1;
@@ -44,12 +47,11 @@ fn tokenize(source) -> array {
             let start_line = line;
             let start_col = col;
 
-            // Numbers
             if c >= 48 && c <= 57 { 
                 let num_str = "";
                 while i < len {
                     let nc = byte_at(source, i);
-                    if (nc >= 48 && nc <= 57) || nc == 46 { // digit or dot
+                    if (nc >= 48 && nc <= 57) || nc == 46 {
                         num_str = num_str + bytes_to_str([nc]);
                         i = i + 1; col = col + 1;
                     } else {
@@ -58,25 +60,24 @@ fn tokenize(source) -> array {
                 }
                 push(tokens, make_token("Number", num_str, num_str, start_line, start_col));
             } 
-            // Strings
             else if c == 34 { 
                 let val = "";
                 let has_interp = false;
-                i = i + 1; col = col + 1; // skip opening "
+                i = i + 1; col = col + 1;
                 
                 while i < len && byte_at(source, i) != 34 {
                     let nc = byte_at(source, i);
-                    if nc == 92 { // backslash
+                    if nc == 92 {
                         i = i + 1; col = col + 1;
                         if i < len {
                             let esc = byte_at(source, i);
-                            if esc == 110 { val = val + "\n"; } // n
-                            else if esc == 116 { val = val + "\t"; } // t
-                            else if esc == 114 { val = val + "\r"; } // r
+                            if esc == 110 { val = val + "\n"; }
+                            else if esc == 116 { val = val + "\t"; }
+                            else if esc == 114 { val = val + "\r"; }
                             else { val = val + bytes_to_str([esc]); }
                             i = i + 1; col = col + 1;
                         }
-                    } else if nc == 36 && i + 1 < len && byte_at(source, i + 1) == 123 { // ${
+                    } else if nc == 36 && i + 1 < len && byte_at(source, i + 1) == 123 {
                         has_interp = true;
                         val = val + "$" + "{";
                         i = i + 2; col = col + 2;
@@ -86,7 +87,7 @@ fn tokenize(source) -> array {
                     }
                 }
                 if i >= len { throw "Unterminated string at " + str(start_line) + ":" + str(start_col); }
-                i = i + 1; col = col + 1; // skip closing "
+                i = i + 1; col = col + 1;
                 
                 if has_interp {
                     push(tokens, make_token("StringInterp", "\"" + val + "\"", val, start_line, start_col));
@@ -94,7 +95,6 @@ fn tokenize(source) -> array {
                     push(tokens, make_token("String", "\"" + val + "\"", val, start_line, start_col));
                 }
             } 
-            // Identifiers & Keywords
             else if (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 { 
                 let ident = "";
                 while i < len {
@@ -132,7 +132,6 @@ fn tokenize(source) -> array {
                 
                 push(tokens, make_token(kw_type, ident, "", start_line, start_col));
             } 
-            // Operators and Punctuation
             else {
                 let next_c = 0;
                 if i + 1 < len { next_c = byte_at(source, i + 1); }
@@ -152,45 +151,45 @@ fn tokenize(source) -> array {
                 else if c == 46 { type = "Dot"; }
                 else if c == 63 { type = "Question"; }
                 else if c == 37 { type = "Percent"; }
-                else if c == 43 { // +
+                else if c == 43 {
                     if next_c == 61 { type = "PlusEq"; length = 2; }
                     else if next_c == 43 { type = "PlusPlus"; length = 2; }
                     else { type = "Plus"; }
                 }
-                else if c == 45 { // -
+                else if c == 45 {
                     if next_c == 61 { type = "MinusEq"; length = 2; }
                     else if next_c == 45 { type = "MinusMinus"; length = 2; }
                     else { type = "Minus"; }
                 }
-                else if c == 42 { // *
+                else if c == 42 {
                     if next_c == 61 { type = "StarEq"; length = 2; }
                     else { type = "Star"; }
                 }
-                else if c == 47 { // /
+                else if c == 47 {
                     if next_c == 61 { type = "SlashEq"; length = 2; }
                     else { type = "Slash"; }
                 }
-                else if c == 61 { // =
+                else if c == 61 {
                     if next_c == 61 { type = "EqEq"; length = 2; }
                     else { type = "Eq"; }
                 }
-                else if c == 33 { // !
+                else if c == 33 {
                     if next_c == 61 { type = "NotEq"; length = 2; }
                     else { type = "Bang"; }
                 }
-                else if c == 60 { // <
+                else if c == 60 {
                     if next_c == 61 { type = "LtEq"; length = 2; }
                     else { type = "Lt"; }
                 }
-                else if c == 62 { // >
+                else if c == 62 {
                     if next_c == 61 { type = "GtEq"; length = 2; }
                     else { type = "Gt"; }
                 }
-                else if c == 38 { // &
+                else if c == 38 {
                     if next_c == 38 { type = "And"; length = 2; }
                     else { throw "Unexpected & at line " + str(start_line); }
                 }
-                else if c == 124 { // |
+                else if c == 124 {
                     if next_c == 124 { type = "Or"; length = 2; }
                     else { throw "Unexpected | at line " + str(start_line); }
                 }
@@ -208,19 +207,3 @@ fn tokenize(source) -> array {
     push(tokens, make_token("Eof", "", "", line, col));
     return tokens;
 }
-
-fn main() {
-    if len(args) < 1 {
-        print("Usage: donky-native vm lexer.donk <file.donk>");
-        return;
-    }
-    let source = read_file(args[0]);
-    let tokens = tokenize(source);
-    for t in tokens {
-        if t["type"] == "Eof" { break; }
-        print(t["type"] + " " + t["lexeme"] + " @ " + str(t["line"]) + ":" + str(t["col"]));
-    }
-    print("Total tokens: " + str(len(tokens)));
-}
-
-//main();
