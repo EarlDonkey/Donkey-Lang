@@ -24,7 +24,7 @@ fn compile_expr(c, expr) {
         emit(c, "PushNumber " + str(expr["value"]));
     } 
     else if t == "String" {
-        emit(c, "PushString " + expr["value"]);
+        emit(c, "PushString \"" + expr["value"] + "\"");
     }
     else if t == "Bool" {
         emit(c, "PushBool " + str(expr["value"]));
@@ -375,7 +375,7 @@ fn compile(ast) -> array {
     let c = make_compiler();
     for stmt in ast { compile_stmt(c, stmt); }
     emit(c, "Halt");
-    return peephole(c["code"]);
+    return c["code"]; // <--- REMOVED peephole()
 }
 
 fn main() {

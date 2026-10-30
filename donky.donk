@@ -570,7 +570,7 @@ fn compile_expr(c, expr) {
         emit(c, "PushNumber " + str(expr["value"]));
     } 
     else if t == "String" {
-        emit(c, "PushString " + expr["value"]);
+        emit(c, "PushString \"" + expr["value"] + "\"");
     }
     else if t == "Bool" {
         emit(c, "PushBool " + str(expr["value"]));
@@ -635,15 +635,15 @@ fn compile_stmt(c, stmt) {
     else if t == "Function" {
         let jmp_idx = len(c["code"]);
         emit(c, "Jump 0");
-        
         let func_start = len(c["code"]);
         
-        let params = stmt["params"];
-        let i = len(params) - 1;
-        while i >= 0 {
-            emit(c, "SetLocal " + params[i]);
-            i = i - 1;
-        }
+        // DELETE THESE LINES:
+        // let params = stmt["params"];
+        // let i = len(params) - 1;
+        // while i >= 0 {
+        //     emit(c, "SetLocal " + params[i]);
+        //     i = i - 1;
+        // }
         
         compile_stmt(c, stmt["body"]);
         emit(c, "PushNull");
@@ -781,12 +781,23 @@ fn eval_op(op, a, b) {
     if op == "Minus" { return a - b; }
     if op == "Star" { return a * b; }
     if op == "Slash" { return a / b; }
+    if op == "Percent" { return a - a / b * b; }
     if op == "EqEq" { return a == b; }
     if op == "NotEq" { return a != b; }
     if op == "Lt" { return a < b; }
     if op == "Gt" { return a > b; }
     if op == "LtEq" { return a <= b; }
     if op == "GtEq" { return a >= b; }
+    if op == "And" {
+        if !a { return false; }
+        if !b { return false; }
+        return true;
+    }
+    if op == "Or" {
+        if a { return true; }
+        if b { return true; }
+        return false;
+    }
     throw "Unknown operator: " + op;
 }
 
@@ -814,7 +825,10 @@ fn run_bytecode(bytecode, script_args) {
     let locals = {};
     let call_stack = [];
     
-    locals["args"] = script_args;
+
+    let globals = {};
+    globals["args"] = script_args;
+    //locals["args"] = script_args;
     
     let ip = 0;
     let len_bc = len(bytecode);
@@ -832,13 +846,20 @@ fn run_bytecode(bytecode, script_args) {
         }
 
         if op == "PushNumber" { push(stack, num(arg)); }
-        else if op == "PushString" { push(stack, arg); }
+        else if op == "PushString" { 
+            let v = arg;
+            if len(v) >= 2 && byte_at(v, 0) == 34 && byte_at(v, len(v) - 1) == 34 {
+                v = byte_substr(v, 1, len(v) - 1);
+            }
+            push(stack, v); 
+        }
         else if op == "PushBool" { push(stack, arg == "true"); }
         else if op == "PushNull" { push(stack, null); }
         else if op == "Pop" { pop(stack); }
         else if op == "SetLocal" { locals[arg] = pop(stack); }
         else if op == "GetLocal" { 
-            if contains(locals, arg) { push(stack, locals[arg]); } 
+            if contains(locals, arg) { push(stack, locals[arg]); }
+            else if contains(globals, arg) { push(stack, globals[arg]); }
             else { throw "Undefined variable: " + arg; }
         }
         else if op == "BinOp" {
@@ -858,13 +879,13 @@ fn run_bytecode(bytecode, script_args) {
             if !cond { ip = num(arg); continue; }
         }
         else if op == "DefineFunction" {
-            locals[parts[1]] = num(parts[2]);
+            print("DBG DEFINING: " + parts[1]);
+            globals[parts[1]] = num(parts[2]);
         }
         else if op == "Call" {
             let func_name = parts[1];
             let arg_count = num(parts[2]);
-            
-            if !contains(locals, func_name) {
+            if !contains(globals, func_name) {
                 let args = [];
                 let i = 0;
                 while i < arg_count { push(args, pop(stack)); i = i + 1; }
@@ -874,7 +895,12 @@ fn run_bytecode(bytecode, script_args) {
                 let res = call_builtin(func_name, real_args);
                 push(stack, res);
             } else {
-                let func_addr = locals[func_name];
+                let func_addr = globals[func_name];
+                
+                // Pop arguments so the stack is clean for the new frame
+                let i = 0;
+                while i < arg_count { pop(stack); i = i + 1; }
+                
                 push(call_stack, { "ip": ip + 1, "locals": locals });
                 locals = {};
                 ip = func_addr;
@@ -945,13 +971,22 @@ fn boot() {
 
     if args[0] == "donky.donk" {
         print("=== SELF-HOST MODE ===");
-        let src  = read_file("donky.donk");
+        let src = read_file("donky.donk");
         let toks = tokenize(src);
         let tree = parse(toks);
         let self_bc = compile(tree);
         print("self-compiled donky.donk: " + str(len(self_bc)) + " ops");
         print("=== RUNNING SELF-COMPILED COMPILER ON test_math.donk ===");
-        run_bytecode(self_bc, ["test_math.donk"]);
+        
+        // Bypass the inner boot entirely. We already have the compiler!
+        let inner_path = "test_math.donk";
+        let inner_src = read_file(inner_path);
+        let inner_toks = tokenize(inner_src);
+        let inner_tree = parse(inner_toks);
+        let inner_bc = compile(inner_tree);
+        
+        print("compiled " + inner_path + " -> (" + str(len(inner_bc)) + " ops)");
+        run_bytecode(inner_bc, [inner_path]);
         return;
     }
 
@@ -960,13 +995,12 @@ fn boot() {
     let tokens = tokenize(source);
     let ast = parse(tokens);
     let bytecode = compile(ast);
-
+    
     let bc_path = path + ".bytecode";
     write_file(bc_path, join(bytecode, "\n"));
     print("compiled " + path + " -> " + bc_path + " (" + str(len(bytecode)) + " ops)");
-
-    let bc_lines = split(read_file(bc_path), "\n");
-    run_bytecode(bc_lines, [path]);
+    
+    run_bytecode(bytecode, [path]);
 }
 
 boot();

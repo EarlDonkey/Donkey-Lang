@@ -66,14 +66,23 @@ fn _run_bytecode_impl(bytecode, script_args, output_sink, max_steps) {
 
     let decoded = [];
     for instruction in bytecode {
-        let parts = split(instruction, " ");
-        let op = parts[0];
+        let op = "";
         let arg = "";
-        if len(parts) > 1 {
-            let arg_parts = [];
-            let i = 1;
-            while i < len(parts) { push(arg_parts, parts[i]); i = i + 1; }
-            arg = join(arg_parts, " ");
+        let space_idx = -1;
+        let i = 0;
+        while i < len(instruction) {
+            if byte_at(instruction, i) == 32 { 
+                space_idx = i; 
+                break; 
+            }
+            i = i + 1;
+        }
+        
+        if space_idx == -1 {
+            op = instruction;
+        } else {
+            op = byte_substr(instruction, 0, space_idx);
+            arg = byte_substr(instruction, space_idx + 1, len(instruction));
         }
         push(decoded, [op, arg]);
     }
@@ -92,7 +101,13 @@ fn _run_bytecode_impl(bytecode, script_args, output_sink, max_steps) {
         let arg = pair[1];
 
         if op == "PushNumber" { push(stack, num(arg)); }
-        else if op == "PushString" { push(stack, arg); }
+        else if op == "PushString" { 
+            let v = arg;
+            if len(v) >= 2 && byte_at(v, 0) == 34 && byte_at(v, len(v) - 1) == 34 {
+                v = byte_substr(v, 1, len(v) - 1);
+            }
+            push(stack, v); 
+        }
         else if op == "PushBool" { push(stack, arg == "true"); }
         else if op == "PushNull" { push(stack, null); }
         else if op == "Pop" { pop(stack); }
@@ -177,6 +192,11 @@ fn _run_bytecode_impl(bytecode, script_args, output_sink, max_steps) {
             let raw = split(arg, " ");
             let func_name = raw[0];
             let arg_count = num(raw[1]);
+
+            if func_name == "boot" {
+                print("DBG CALL BOOT: globals has boot? " + str(contains(globals, "boot")));
+            }
+            
             if !contains(globals, func_name) {
                 let args = [];
                 let i = 0;

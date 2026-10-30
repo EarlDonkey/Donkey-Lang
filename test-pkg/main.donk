@@ -1,3 +1,0 @@
-import "donky_modules/mylib/math.donk";
-print(abs(-42));
-print(pow(2, 8));
