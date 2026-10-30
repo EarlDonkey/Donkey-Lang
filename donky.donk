@@ -635,15 +635,11 @@ fn compile_stmt(c, stmt) {
     else if t == "Function" {
         let jmp_idx = len(c["code"]);
         emit(c, "Jump 0");
+        
         let func_start = len(c["code"]);
         
-        // DELETE THESE LINES:
-        // let params = stmt["params"];
-        // let i = len(params) - 1;
-        // while i >= 0 {
-        //     emit(c, "SetLocal " + params[i]);
-        //     i = i - 1;
-        // }
+        // Save the parameter names
+        c["params"][stmt["name"]] = stmt["params"];
         
         compile_stmt(c, stmt["body"]);
         emit(c, "PushNull");
@@ -652,7 +648,7 @@ fn compile_stmt(c, stmt) {
         c["code"][jmp_idx] = "Jump " + str(len(c["code"]));
         
         c["locals"][stmt["name"]] = func_start;
-        emit(c, "DefineFunction " + stmt["name"] + " " + str(func_start));
+        emit(c, "DefineFunction " + stmt["name"] + " " + str(func_start) + " " + join(stmt["params"], ","));
     }
     else if t == "Return" {
         compile_expr(c, stmt["expr"]);
@@ -759,6 +755,8 @@ fn compile_stmt(c, stmt) {
 
 fn compile(ast) -> array {
     let c = make_compiler();
+    // Add the params map to the compiler state
+    c["params"] = {};
     for stmt in ast { compile_stmt(c, stmt); }
     emit(c, "Halt");
     return c["code"];
@@ -879,8 +877,20 @@ fn run_bytecode(bytecode, script_args) {
             if !cond { ip = num(arg); continue; }
         }
         else if op == "DefineFunction" {
-            print("DBG DEFINING: " + parts[1]);
-            globals[parts[1]] = num(parts[2]);
+            // arg is "add 28 a,b"
+            let raw = split(arg, " ");
+            let name = raw[0];
+            let addr = num(raw[1]);
+            let param_str = "";
+            if len(raw) > 2 { param_str = raw[2]; }
+            
+            globals[name] = addr;
+            
+            let params_arr = [];
+            if len(param_str) > 0 {
+                params_arr = split(param_str, ",");
+            }
+            globals[name + "_params"] = params_arr;
         }
         else if op == "Call" {
             let func_name = parts[1];
@@ -897,12 +907,27 @@ fn run_bytecode(bytecode, script_args) {
             } else {
                 let func_addr = globals[func_name];
                 
-                // Pop arguments so the stack is clean for the new frame
+                // Pop arguments
+                let args = [];
                 let i = 0;
-                while i < arg_count { pop(stack); i = i + 1; }
+                while i < arg_count { push(args, pop(stack)); i = i + 1; }
+                
+                // Reverse them to correct order
+                let real_args = [];
+                let j = len(args) - 1;
+                while j >= 0 { push(real_args, args[j]); j = j - 1; }
                 
                 push(call_stack, { "ip": ip + 1, "locals": locals });
+                
+                // Setup new locals
                 locals = {};
+                let p_names = globals[func_name + "_params"];
+                let k = 0;
+                while k < len(p_names) && k < len(real_args) {
+                    locals[p_names[k]] = real_args[k];
+                    k = k + 1;
+                }
+                
                 ip = func_addr;
                 continue;
             }

@@ -1,3 +1,6 @@
-let x = 1;
-let y = 2;
-print(x + y);
+fn add(a, b) {
+    return a + b;
+}
+
+let result = add(5, 7);
+print(result);

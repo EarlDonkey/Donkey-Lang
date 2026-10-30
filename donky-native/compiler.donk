@@ -83,24 +83,20 @@ fn compile_stmt(c, stmt) {
     else if t == "Function" {
         let jmp_idx = len(c["code"]);
         emit(c, "Jump 0");
-
+        
         let func_start = len(c["code"]);
-
-        let params = stmt["params"];
-        let i = len(params) - 1;
-        while i >= 0 {
-            emit(c, "SetLocal " + params[i]);
-            i = i - 1;
-        }
-
+        
+        // Save the parameter names
+        c["params"][stmt["name"]] = stmt["params"];
+        
         compile_stmt(c, stmt["body"]);
         emit(c, "PushNull");
         emit(c, "Return");
-
+        
         c["code"][jmp_idx] = "Jump " + str(len(c["code"]));
-
+        
         c["locals"][stmt["name"]] = func_start;
-        emit(c, "DefineFunction " + stmt["name"] + " " + str(func_start));
+        emit(c, "DefineFunction " + stmt["name"] + " " + str(func_start) + " " + join(stmt["params"], ","));
     }
     else if t == "Return" {
         compile_expr(c, stmt["expr"]);
@@ -373,9 +369,11 @@ fn peephole(code) -> array {
 
 fn compile(ast) -> array {
     let c = make_compiler();
+    // Add the params map to the compiler state
+    c["params"] = {};
     for stmt in ast { compile_stmt(c, stmt); }
     emit(c, "Halt");
-    return c["code"]; // <--- REMOVED peephole()
+    return c["code"];
 }
 
 fn main() {

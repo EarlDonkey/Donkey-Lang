@@ -185,8 +185,20 @@ fn _run_bytecode_impl(bytecode, script_args, output_sink, max_steps) {
             if !cond { ip = num(arg); continue; }
         }
         else if op == "DefineFunction" {
+            // arg is "add 28 a,b"
             let raw = split(arg, " ");
-            globals[raw[0]] = num(raw[1]);
+            let name = raw[0];
+            let addr = num(raw[1]);
+            let param_str = "";
+            if len(raw) > 2 { param_str = raw[2]; }
+            
+            globals[name] = addr;
+            
+            let params_arr = [];
+            if len(param_str) > 0 {
+                params_arr = split(param_str, ",");
+            }
+            globals[name + "_params"] = params_arr;
         }
         else if op == "Call" {
             let raw = split(arg, " ");
@@ -208,8 +220,28 @@ fn _run_bytecode_impl(bytecode, script_args, output_sink, max_steps) {
                 push(stack, res);
             } else {
                 let func_addr = globals[func_name];
+                
+                // Pop arguments
+                let args = [];
+                let i = 0;
+                while i < arg_count { push(args, pop(stack)); i = i + 1; }
+                
+                // Reverse them to correct order
+                let real_args = [];
+                let j = len(args) - 1;
+                while j >= 0 { push(real_args, args[j]); j = j - 1; }
+                
                 push(call_stack, { "ip": ip + 1, "locals": locals });
+                
+                // Setup new locals
                 locals = {};
+                let p_names = globals[func_name + "_params"];
+                let k = 0;
+                while k < len(p_names) && k < len(real_args) {
+                    locals[p_names[k]] = real_args[k];
+                    k = k + 1;
+                }
+                
                 ip = func_addr;
                 continue;
             }
