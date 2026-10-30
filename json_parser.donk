@@ -124,16 +124,22 @@ fn parse_value(s, i, len) {
 }
 
 fn main() {
-    let f = read_file("test_data.json");
+    if len(args) < 1.0 {
+        print("Usage: json_parser.exe <file.json>");
+        return;
+    }
+    
+    let filepath = args[0];
+    let f = read_file(filepath);
+    
     if len(f) == 0.0 {
-        print("Error: Could not read test_data.json");
+        print("Error: Could not read " + filepath);
         return;
     }
     
     let res = parse_value(f, 0.0, len(f));
     let parsed = res[1];
     
-    print("Parse successful!");
     print(parsed);
 }
 

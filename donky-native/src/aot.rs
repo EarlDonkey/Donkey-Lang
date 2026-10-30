@@ -16,7 +16,6 @@ pub struct RuntimeFuncs {
     pub index_set_id: FuncId,
     pub alloc_string_id: FuncId,
     
-    // Standard Library
     pub len_id: FuncId,
     pub push_id: FuncId,
     pub pop_id: FuncId,
@@ -27,6 +26,14 @@ pub struct RuntimeFuncs {
     pub eq_id: FuncId,
     pub byte_at_id: FuncId,
     pub substr_id: FuncId,
+    pub truthy_id: FuncId,
+
+    pub throw_id: FuncId,
+    pub has_exception_id: FuncId,
+    pub get_exception_id: FuncId,
+    pub clear_exception_id: FuncId,
+
+    pub get_args_id: FuncId,
 }
 
 pub struct AotCompiler {
@@ -40,6 +47,7 @@ pub struct AotCompiler {
 struct FunctionContext {
     variables: HashMap<String, Variable>,
     next_var: usize,
+    exception_target: Option<Block>,
 }
 
 impl AotCompiler {
@@ -79,6 +87,14 @@ impl AotCompiler {
             eq_id: declare("donky_eq", &[types::I64, types::I64], Some(types::I64)),
             byte_at_id: declare("donky_byte_at", &[types::I64, types::I64], Some(types::I64)),
             substr_id: declare("donky_substr", &[types::I64, types::I64, types::I64], Some(types::I64)),
+            truthy_id: declare("donky_truthy", &[types::I64], Some(types::I64)),
+            
+            throw_id: declare("donky_throw", &[types::I64], None),
+            has_exception_id: declare("donky_has_exception", &[], Some(types::I32)),
+            get_exception_id: declare("donky_get_exception", &[], Some(types::I64)),
+            clear_exception_id: declare("donky_clear_exception", &[], None),
+            
+            get_args_id: declare("donky_get_args", &[], Some(types::I64)),
         };
         
         AotCompiler {
@@ -109,7 +125,9 @@ impl AotCompiler {
             }
         }
 
-        let sig = self.module.make_signature();
+        // donky_toplevel returns I64 to match all other functions
+        let mut sig = self.module.make_signature();
+        sig.returns.push(AbiParam::new(types::I64));
         let main_id = self.module.declare_function("donky_toplevel", Linkage::Export, &sig).unwrap();
         self.ctx.func.signature = sig;
 
@@ -120,7 +138,18 @@ impl AotCompiler {
             builder.switch_to_block(entry_block);
             builder.seal_block(entry_block);
 
-            let mut fctx = FunctionContext { variables: HashMap::new(), next_var: 0 };
+            let mut fctx = FunctionContext { variables: HashMap::new(), next_var: 0, exception_target: None };
+            
+            // Inject args
+            let get_args_func = self.module.declare_func_in_func(self.runtime.get_args_id, builder.func);
+            let args_call = builder.ins().call(get_args_func, &[]);
+            let args_val = builder.inst_results(args_call)[0];
+            let args_var = Variable::new(fctx.next_var);
+            fctx.next_var += 1;
+            builder.declare_var(args_var, types::I64);
+            builder.def_var(args_var, args_val);
+            fctx.variables.insert("args".to_string(), args_var);
+            
             let mut terminated = false;
 
             for stmt in stmts {
@@ -130,7 +159,10 @@ impl AotCompiler {
                 }
             }
 
-            if !terminated { builder.ins().return_(&[]); }
+            if !terminated { 
+                let zero = builder.ins().iconst(types::I64, 0);
+                builder.ins().return_(&[zero]); 
+            }
             builder.finalize();
         }
 
@@ -156,7 +188,7 @@ impl AotCompiler {
             builder.switch_to_block(entry_block);
             builder.seal_block(entry_block);
 
-            let mut fctx = FunctionContext { variables: HashMap::new(), next_var: 0 };
+            let mut fctx = FunctionContext { variables: HashMap::new(), next_var: 0, exception_target: None };
             let block_params: Vec<Value> = builder.block_params(entry_block).to_vec();
 
             for (i, param_name) in params.iter().enumerate() {
@@ -167,10 +199,20 @@ impl AotCompiler {
                 fctx.variables.insert(param_name.clone(), var);
             }
 
+            // Inject args
+            let get_args_func = self.module.declare_func_in_func(self.runtime.get_args_id, builder.func);
+            let args_call = builder.ins().call(get_args_func, &[]);
+            let args_val = builder.inst_results(args_call)[0];
+            let args_var = Variable::new(fctx.next_var);
+            fctx.next_var += 1;
+            builder.declare_var(args_var, types::I64);
+            builder.def_var(args_var, args_val);
+            fctx.variables.insert("args".to_string(), args_var);
+
             let terminated = Self::compile_stmt(&mut builder, &mut self.module, &self.runtime, &self.user_functions, &mut fctx, body);
 
             if !terminated {
-                let zero = builder.ins().iconst(types::I64, 0.0_f64.to_bits() as i64);
+                let zero = builder.ins().iconst(types::I64, 0);
                 builder.ins().return_(&[zero]);
             }
             builder.finalize();
@@ -226,25 +268,82 @@ impl AotCompiler {
                 let val = if let Some(e) = expr {
                     Self::compile_expr(builder, module, runtime, user_funcs, fctx, e)
                 } else {
-                    builder.ins().iconst(types::I64, 0.0_f64.to_bits() as i64)
+                    builder.ins().iconst(types::I64, 0)
                 };
                 builder.ins().return_(&[val]);
                 true
             }
+            Stmt::Throw(expr) => {
+                let val = Self::compile_expr(builder, module, runtime, user_funcs, fctx, expr);
+                let throw_func = module.declare_func_in_func(runtime.throw_id, builder.func);
+                builder.ins().call(throw_func, &[val]);
+                
+                if let Some(target) = fctx.exception_target {
+                    builder.ins().jump(target, &[]);
+                } else {
+                    let zero = builder.ins().iconst(types::I64, 0);
+                    builder.ins().return_(&[zero]);
+                }
+                true
+            }
+            Stmt::Try(try_b, err_name, catch_b) => {
+                let catch_block = builder.create_block();
+                let merge_block = builder.create_block();
+                
+                let prev_target = fctx.exception_target;
+                fctx.exception_target = Some(catch_block);
+                
+                let try_term = Self::compile_stmt(builder, module, runtime, user_funcs, fctx, try_b);
+                
+                fctx.exception_target = prev_target;
+                
+                if !try_term {
+                    builder.ins().jump(merge_block, &[]);
+                }
+                
+                builder.seal_block(catch_block);
+                builder.switch_to_block(catch_block);
+                
+                let get_exc_func = module.declare_func_in_func(runtime.get_exception_id, builder.func);
+                let exc_call = builder.ins().call(get_exc_func, &[]);
+                let exc_val = builder.inst_results(exc_call)[0];
+                
+                let clear_exc_func = module.declare_func_in_func(runtime.clear_exception_id, builder.func);
+                builder.ins().call(clear_exc_func, &[]);
+                
+                let err_var = Variable::new(fctx.next_var);
+                fctx.next_var += 1;
+                builder.declare_var(err_var, types::I64);
+                builder.def_var(err_var, exc_val);
+                fctx.variables.insert(err_name.clone(), err_var);
+                
+                let catch_term = Self::compile_stmt(builder, module, runtime, user_funcs, fctx, catch_b);
+                if !catch_term {
+                    builder.ins().jump(merge_block, &[]);
+                }
+                
+                builder.switch_to_block(merge_block);
+                builder.seal_block(merge_block);
+                false
+            }
             Stmt::If(cond, then_b, else_b) => {
                 let cond_val = Self::compile_expr(builder, module, runtime, user_funcs, fctx, cond);
-                let cond_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), cond_val);
+                
+                let truthy_func = module.declare_func_in_func(runtime.truthy_id, builder.func);
+                let call = builder.ins().call(truthy_func, &[cond_val]);
+                let truthy_val = builder.inst_results(call)[0];
+                
+                let truthy_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), truthy_val);
                 let zero = builder.ins().f64const(0.0);
-                let is_true = builder.ins().fcmp(FloatCC::NotEqual, cond_f64, zero);
+                let is_true = builder.ins().fcmp(FloatCC::NotEqual, truthy_f64, zero);
 
                 let then_block = builder.create_block();
                 let else_block = builder.create_block();
                 let merge_block = builder.create_block();
-                builder.seal_block(then_block);
-                builder.seal_block(else_block);
-                builder.seal_block(merge_block);
 
                 builder.ins().brif(is_true, then_block, &[], else_block, &[]);
+                builder.seal_block(then_block);
+                builder.seal_block(else_block);
 
                 builder.switch_to_block(then_block);
                 let then_term = Self::compile_stmt(builder, module, runtime, user_funcs, fctx, then_b);
@@ -260,6 +359,7 @@ impl AotCompiler {
                     builder.ins().jump(merge_block, &[]);
                 }
 
+                builder.seal_block(merge_block);
                 builder.switch_to_block(merge_block);
                 false
             }
@@ -267,22 +367,24 @@ impl AotCompiler {
                 let header_block = builder.create_block();
                 let body_block = builder.create_block();
                 let exit_block = builder.create_block();
-                let cond_exit = builder.create_block();
                 
-                builder.seal_block(body_block);
-                builder.seal_block(cond_exit);
-
                 builder.ins().jump(header_block, &[]);
 
                 builder.switch_to_block(header_block);
+                builder.seal_block(header_block);
                 let cond_val = Self::compile_expr(builder, module, runtime, user_funcs, fctx, cond);
-                let cond_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), cond_val);
+                
+                let truthy_func = module.declare_func_in_func(runtime.truthy_id, builder.func);
+                let call = builder.ins().call(truthy_func, &[cond_val]);
+                let truthy_val = builder.inst_results(call)[0];
+                
+                let truthy_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), truthy_val);
                 let zero = builder.ins().f64const(0.0);
-                let is_true = builder.ins().fcmp(FloatCC::NotEqual, cond_f64, zero);
-                builder.ins().brif(is_true, body_block, &[], cond_exit, &[]);
-
-                builder.switch_to_block(cond_exit);
-                builder.ins().jump(exit_block, &[]);
+                let is_true = builder.ins().fcmp(FloatCC::NotEqual, truthy_f64, zero);
+                
+                builder.ins().brif(is_true, body_block, &[], exit_block, &[]);
+                builder.seal_block(body_block);
+                builder.seal_block(exit_block);
 
                 builder.switch_to_block(body_block);
                 let body_term = Self::compile_stmt(builder, module, runtime, user_funcs, fctx, body);
@@ -291,8 +393,6 @@ impl AotCompiler {
                 }
 
                 builder.switch_to_block(exit_block);
-                builder.seal_block(exit_block);
-                builder.seal_block(header_block);
                 false
             }
             Stmt::For(var_name, iter_expr, body) => {
@@ -306,7 +406,7 @@ impl AotCompiler {
                 builder.def_var(iter_var, iter_val);
                 fctx.variables.insert(iter_var_name.clone(), iter_var);
 
-                let zero = builder.ins().iconst(types::I64, 0.0_f64.to_bits() as i64);
+                let zero = builder.ins().iconst(types::I64, 0);
                 let idx_var = Variable::new(fctx.next_var);
                 fctx.next_var += 1;
                 builder.declare_var(idx_var, types::I64);
@@ -316,14 +416,11 @@ impl AotCompiler {
                 let header_block = builder.create_block();
                 let body_block = builder.create_block();
                 let exit_block = builder.create_block();
-                let cond_exit = builder.create_block();
                 
-                builder.seal_block(body_block);
-                builder.seal_block(cond_exit);
-
                 builder.ins().jump(header_block, &[]);
 
                 builder.switch_to_block(header_block);
+                builder.seal_block(header_block);
                 
                 let len_func = module.declare_func_in_func(runtime.len_id, builder.func);
                 let iter_h = builder.use_var(iter_var);
@@ -334,10 +431,9 @@ impl AotCompiler {
                 let idx_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), idx_h);
                 let len_f64 = builder.ins().bitcast(types::F64, MemFlags::new(), len_val);
                 let cond = builder.ins().fcmp(FloatCC::LessThan, idx_f64, len_f64);
-                builder.ins().brif(cond, body_block, &[], cond_exit, &[]);
-
-                builder.switch_to_block(cond_exit);
-                builder.ins().jump(exit_block, &[]);
+                builder.ins().brif(cond, body_block, &[], exit_block, &[]);
+                builder.seal_block(body_block);
+                builder.seal_block(exit_block);
 
                 builder.switch_to_block(body_block);
                 
@@ -353,7 +449,7 @@ impl AotCompiler {
 
                 let term = Self::compile_stmt(builder, module, runtime, user_funcs, fctx, body);
                 if !term {
-                    let one = builder.ins().iconst(types::I64, 1.0_f64.to_bits() as i64);
+                    let one = builder.ins().iconst(types::I64, 1);
                     let add_func = module.declare_func_in_func(runtime.add_id, builder.func);
                     let add_call = builder.ins().call(add_func, &[idx_h, one]);
                     let next_idx = builder.inst_results(add_call)[0];
@@ -363,8 +459,6 @@ impl AotCompiler {
                 }
 
                 builder.switch_to_block(exit_block);
-                builder.seal_block(exit_block);
-                builder.seal_block(header_block);
                 false
             }
             Stmt::Match(target, cases, else_block) => {
@@ -393,9 +487,10 @@ impl AotCompiler {
                     builder.seal_block(body_block);
                     
                     let next_check = if i + 1 < cases.len() { check_blocks[i+1] } else { else_check_block.unwrap_or(merge_block) };
-                    if i + 1 < cases.len() { builder.seal_block(check_blocks[i+1]); }
                     
                     builder.ins().brif(cond, body_block, &[], next_check, &[]);
+                    if i + 1 < cases.len() { builder.seal_block(check_blocks[i+1]); }
+                    if let Some(eb) = else_check_block { builder.seal_block(eb); }
 
                     builder.switch_to_block(body_block);
                     let term = Self::compile_stmt(builder, module, runtime, user_funcs, fctx, body);
@@ -407,7 +502,6 @@ impl AotCompiler {
                 if let Some(eb) = else_block {
                     if let Some(eb_block) = else_check_block {
                         builder.switch_to_block(eb_block);
-                        builder.seal_block(eb_block);
                         let term = Self::compile_stmt(builder, module, runtime, user_funcs, fctx, eb);
                         if !term {
                             builder.ins().jump(merge_block, &[]);
@@ -415,8 +509,8 @@ impl AotCompiler {
                     }
                 }
 
-                builder.switch_to_block(merge_block);
                 builder.seal_block(merge_block);
+                builder.switch_to_block(merge_block);
                 false
             }
             Stmt::Block(stmts) => {
@@ -440,7 +534,12 @@ impl AotCompiler {
     ) -> Value {
         match expr {
             Expr::Number(n) => builder.ins().iconst(types::I64, n.to_bits() as i64),
-            Expr::Bool(b) => builder.ins().iconst(types::I64, (if *b { 1.0_f64 } else { 0.0_f64 }).to_bits() as i64),
+            Expr::Bool(b) => {
+                let tag_base: u64 = 0x7FF8_0000_0000_0000;
+                let tag_bool: u64 = 1;
+                let val = tag_base | (tag_bool << 48) | (if *b { 1 } else { 0 });
+                builder.ins().iconst(types::I64, val as i64)
+            }
             Expr::String(s) => {
                 let data_id = module.declare_data(&format!("str_{}_{}", s.len(), s.as_ptr() as usize), Linkage::Export, true, false).unwrap();
                 let mut data_ctx = DataDescription::new();
@@ -468,7 +567,31 @@ impl AotCompiler {
                         arg_vals.push(Self::compile_expr(builder, module, runtime, user_funcs, fctx, arg));
                     }
                     let call = builder.ins().call(local_callee, &arg_vals);
-                    builder.inst_results(call)[0]
+                    let ret_val = builder.inst_results(call)[0];
+                    
+                    // Check for exception
+                    let has_exc_func = module.declare_func_in_func(runtime.has_exception_id, builder.func);
+                    let exc_call = builder.ins().call(has_exc_func, &[]);
+                    let has_exc = builder.inst_results(exc_call)[0];
+                    let zero = builder.ins().iconst(types::I32, 0);
+                    let cmp = builder.ins().icmp(IntCC::NotEqual, has_exc, zero);
+                    
+                    let cont_block = builder.create_block();
+                    let exc_block = builder.create_block();
+                    builder.ins().brif(cmp, exc_block, &[], cont_block, &[]);
+                    builder.seal_block(exc_block);
+                    builder.seal_block(cont_block);
+                    
+                    builder.switch_to_block(exc_block);
+                    if let Some(target) = fctx.exception_target {
+                        builder.ins().jump(target, &[]);
+                    } else {
+                        let zero_val = builder.ins().iconst(types::I64, 0);
+                        builder.ins().return_(&[zero_val]);
+                    }
+                    
+                    builder.switch_to_block(cont_block);
+                    ret_val
                 } else {
                     let builtin_id = match name.as_str() {
                         "len" => runtime.len_id,

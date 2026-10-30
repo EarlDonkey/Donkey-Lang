@@ -821,7 +821,10 @@ impl Interpreter {
         self.env.scopes.pop();
         let body_scopes = std::mem::replace(&mut self.env.scopes, caller_scopes);
         if let Some(env) = &captured { *env.borrow_mut() = body_scopes; }
-        let result = result?;
-        if let ControlFlow::Return(val) = result { Ok(val) } else { Ok(Value::null()) }
+        match result? {
+            ControlFlow::Return(val) => Ok(val),
+            ControlFlow::Throw(val) => Err(val.to_string_with_heap(&self.heap)),
+            _ => Ok(Value::null()),
+        }
     }
 }

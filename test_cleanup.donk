@@ -1,0 +1,16 @@
+print(true);
+print(false);
+
+if true {
+    print("if works!");
+}
+
+fn throw_error() {
+    throw "Something went wrong!";
+}
+
+try {
+    throw_error();
+} catch e {
+    print("Caught: " + e);
+}

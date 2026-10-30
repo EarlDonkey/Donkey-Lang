@@ -126,12 +126,15 @@ fn main() {
 
 #define TAG_MASK 0xFFF8000000000000ULL
 #define TAG_BASE 0x7FF8000000000000ULL
+#define TAG_BOOL 1ULL
 #define TAG_STRING 2ULL
 #define TAG_ARRAY 3ULL
 #define TAG_MAP 4ULL
 
 typedef struct { uint64_t* data; size_t len; size_t cap; } Array;
 typedef struct { uint64_t* keys; uint64_t* vals; size_t len; size_t cap; } Map;
+
+uint64_t current_exception = 0;
 
 int is_number(uint64_t v) { return (v & TAG_MASK) != TAG_BASE; }
 double as_number(uint64_t v) { double d; memcpy(&d, &v, 8); return d; }
@@ -144,8 +147,10 @@ void print_value(uint64_t val) {
         double d = as_number(val);
         if (d == (long long)d) printf("%lld", (long long)d);
         else printf("%g", d);
+    } else if (get_tag(val) == TAG_BOOL) {
+        printf("%s", (val & 1) ? "true" : "false");
     } else if (get_tag(val) == TAG_STRING) {
-        printf("\"%s\"", (char*)as_index(val)); // Print with quotes for JSON output
+        printf("\"%s\"", (char*)as_index(val));
     } else if (get_tag(val) == TAG_ARRAY) {
         Array* arr = (Array*)as_index(val);
         printf("[");
@@ -172,6 +177,20 @@ void print_value(uint64_t val) {
 void donky_print(uint64_t val) {
     print_value(val);
     printf("\n");
+}
+
+uint64_t donky_truthy(uint64_t val) {
+    if (is_number(val)) return make_number(as_number(val) != 0.0 ? 1.0 : 0.0);
+    if (get_tag(val) == TAG_BOOL) return make_number((val & 1) ? 1.0 : 0.0);
+    return make_number(1.0); // Arrays, Maps, Strings are truthy
+}
+
+int donky_has_exception() { return current_exception != 0; }
+uint64_t donky_get_exception() { return current_exception; }
+void donky_clear_exception() { current_exception = 0; }
+
+void donky_throw(uint64_t val) {
+    current_exception = val;
 }
 
 uint64_t donky_alloc_string(const char* s) {
@@ -244,6 +263,7 @@ uint64_t donky_index_set(uint64_t target, uint64_t index, uint64_t val) {
 
 uint64_t donky_eq(uint64_t a, uint64_t b) {
     if (is_number(a) && is_number(b)) return make_number(as_number(a) == as_number(b) ? 1.0 : 0.0);
+    if (get_tag(a) == TAG_BOOL && get_tag(b) == TAG_BOOL) return make_number((a & 1) == (b & 1) ? 1.0 : 0.0);
     if (get_tag(a) == TAG_STRING && get_tag(b) == TAG_STRING) {
         return make_number(strcmp((char*)as_index(a), (char*)as_index(b)) == 0 ? 1.0 : 0.0);
     }
@@ -324,6 +344,8 @@ uint64_t donky_str(uint64_t val) {
         else sprintf(buf, "%g", d);
     } else if (get_tag(val) == TAG_STRING) {
         return val;
+    } else if (get_tag(val) == TAG_BOOL) {
+        strcpy(buf, (val & 1) ? "true" : "false");
     } else if (get_tag(val) == TAG_ARRAY) { strcpy(buf, "[array]"); }
     else if (get_tag(val) == TAG_MAP) { strcpy(buf, "{map}"); }
     else { strcpy(buf, "null"); }
@@ -352,9 +374,32 @@ uint64_t donky_read_file(uint64_t path_val) {
     return res;
 }
 
-int main() {
-    extern void donky_toplevel();
+// --- Argument Handling ---
+uint64_t donky_args_array = 0;
+
+void donky_set_args(int argc, char** argv) {
+    uint64_t arr_val = donky_alloc_array();
+    for (int i = 1; i < argc; i++) { // Skip argv[0] (exe name)
+        donky_array_push(arr_val, donky_alloc_string(argv[i]));
+    }
+    donky_args_array = arr_val;
+}
+
+uint64_t donky_get_args() {
+    return donky_args_array;
+}
+
+int main(int argc, char** argv) {
+    donky_set_args(argc, argv);
+    extern int64_t donky_toplevel();
     donky_toplevel();
+    
+    if (current_exception != 0) {
+        printf("Uncaught exception: ");
+        print_value(current_exception);
+        printf("\n");
+        return 1;
+    }
     return 0;
 }
 "#;
