@@ -573,9 +573,14 @@ uint64_t donky_getch() { return make_number((double)_getch()); }
 uint64_t donky_kbhit() { return make_number(_kbhit() ? 1.0 : 0.0); }
 
 uint64_t donky_input(uint64_t prompt_val) {
-    if (get_tag(prompt_val) == TAG_STRING) printf("%s", (char*)as_index(prompt_val));
+    if (get_tag(prompt_val) == TAG_STRING) {
+        printf("%s", (char*)as_index(prompt_val));
+        fflush(stdout); // <-- ADD THIS LINE
+    }
     char buf[256];
-    fgets(buf, 256, stdin);
+    if (fgets(buf, 256, stdin) == NULL) {
+        return donky_alloc_string(""); // Handle EOF
+    }
     buf[strcspn(buf, "\r\n")] = 0;
     return donky_alloc_string(buf);
 }

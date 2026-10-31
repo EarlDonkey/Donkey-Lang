@@ -1,0 +1,13 @@
+// Factory function to create a Dog
+fn new_dog(name, age, breed) {
+    return {
+        "name": name,
+        "age": age,
+        "breed": breed
+    };
+}
+
+// A helper to print a dog nicely
+fn dog_to_string(dog) {
+    return dog["name"] + " (" + dog["breed"] + ", Age " + str(dog["age"]) + ")";
+}

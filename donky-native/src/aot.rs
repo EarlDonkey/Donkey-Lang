@@ -878,6 +878,55 @@ impl AotCompiler {
                 }
                 map_handle
             }
+            Expr::StructInit(name, fields) => {
+                let map_func = module.declare_func_in_func(runtime.alloc_map_id, builder.func);
+                let call = builder.ins().call(map_func, &[]);
+                let map_handle = builder.inst_results(call)[0];
+                
+                // 1. Add a "__type__" field so we know what this object is
+                let type_key_idx = STRING_COUNTER.fetch_add(1, Ordering::SeqCst);
+                let type_data_id = module.declare_data(&format!("str_{}", type_key_idx), Linkage::Export, true, false).unwrap();
+                let mut type_data_ctx = DataDescription::new();
+                let mut type_bytes = b"__type__".to_vec(); type_bytes.push(0);
+                type_data_ctx.define(type_bytes.into_boxed_slice()); module.define_data(type_data_id, &type_data_ctx).unwrap();
+                let type_local_data = module.declare_data_in_func(type_data_id, builder.func);
+                let type_ptr = builder.ins().global_value(types::I64, type_local_data);
+                let alloc_str_func = module.declare_func_in_func(runtime.alloc_string_id, builder.func);
+                let type_key_call = builder.ins().call(alloc_str_func, &[type_ptr]);
+                let type_key = builder.inst_results(type_key_call)[0];
+                
+                // Box the struct name as a string
+                let name_idx = STRING_COUNTER.fetch_add(1, Ordering::SeqCst);
+                let name_data_id = module.declare_data(&format!("str_{}", name_idx), Linkage::Export, true, false).unwrap();
+                let mut name_data_ctx = DataDescription::new();
+                let mut name_bytes = name.as_bytes().to_vec(); name_bytes.push(0);
+                name_data_ctx.define(name_bytes.into_boxed_slice()); module.define_data(name_data_id, &name_data_ctx).unwrap();
+                let name_local_data = module.declare_data_in_func(name_data_id, builder.func);
+                let name_ptr = builder.ins().global_value(types::I64, name_local_data);
+                let name_val_call = builder.ins().call(alloc_str_func, &[name_ptr]);
+                let name_val = builder.inst_results(name_val_call)[0];
+                
+                // Set the type field
+                let set_func = module.declare_func_in_func(runtime.map_set_id, builder.func);
+                builder.ins().call(set_func, &[map_handle, type_key, name_val]);
+
+                // 2. Add all the user fields
+                for (field_name, field_val) in fields {
+                    let field_idx = STRING_COUNTER.fetch_add(1, Ordering::SeqCst);
+                    let field_data_id = module.declare_data(&format!("str_{}", field_idx), Linkage::Export, true, false).unwrap();
+                    let mut field_data_ctx = DataDescription::new();
+                    let mut field_bytes = field_name.as_bytes().to_vec(); field_bytes.push(0);
+                    field_data_ctx.define(field_bytes.into_boxed_slice()); module.define_data(field_data_id, &field_data_ctx).unwrap();
+                    let field_local_data = module.declare_data_in_func(field_data_id, builder.func);
+                    let field_ptr = builder.ins().global_value(types::I64, field_local_data);
+                    let field_key_call = builder.ins().call(alloc_str_func, &[field_ptr]);
+                    let field_key = builder.inst_results(field_key_call)[0];
+
+                    let val = Self::compile_expr(builder, module, runtime, user_funcs, fctx, field_val);
+                    builder.ins().call(set_func, &[map_handle, field_key, val]);
+                }
+                map_handle
+            }
             Expr::Index(target, index) => {
                 let t = Self::compile_expr(builder, module, runtime, user_funcs, fctx, target);
                 let i = Self::compile_expr(builder, module, runtime, user_funcs, fctx, index);
