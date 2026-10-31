@@ -1,36 +1,4 @@
-fn read_until(client, delim, max_bytes) {
-    let buf = "";
-    while len(buf) < max_bytes {
-        let chunk = tcp_read(client, 4096);
-        if len(chunk) == 0 { break; }
-        buf = buf + chunk;
-        if contains(buf, delim) { break; }
-    }
-    return buf;
-}
-
-fn get_path(raw_req) {
-    let lines = split(raw_req, "\r\n");
-    if len(lines) == 0 { return "/index.html"; }
-    
-    let parts = split(lines[0], " ");
-    if len(parts) < 2 { return "/index.html"; }
-    
-    let path = parts[1];
-    if path == "/" { return "/index.html"; }
-    if contains(path, "..") { return "/404.html"; }
-    return path;
-}
-
-fn mime_for(path) {
-    if contains(path, ".css") { return "text/css"; }
-    if contains(path, ".js")  { return "text/javascript"; }
-    if contains(path, ".png") { return "image/png"; }
-    if contains(path, ".jpg") { return "image/jpeg"; }
-    if contains(path, ".svg") { return "image/svg+xml"; }
-    if contains(path, ".ico") { return "image/x-icon"; }
-    return "text/html";
-}
+import "lib/http.donk";
 
 // --- Server ---
 let port = 8080;

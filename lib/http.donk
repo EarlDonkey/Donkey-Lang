@@ -1,48 +1,5 @@
 // lib/http.donk — thin HTTP helpers built on http_get
 
-fn http_get_text(url) {
-    return http_get(url);
-}
-
-fn http_get_json(url) {
-    import "lib/json.donk";
-    return json_parse(http_get(url));
-}
-
-// Build a query string from a map
-fn url_encode(s) {
-    let out = "";
-    let i = 0;
-    while i < len(s) {
-        let c = byte_at(s, i);
-        // keep alnum and a few safe chars
-        let is_alnum = (c >= 48 && c <= 57)
-                    || (c >= 65 && c <= 90)
-                    || (c >= 97 && c <= 122)
-                    || c == 45 || c == 46 || c == 95 || c == 126;
-        if is_alnum {
-            out = out + bytes_to_str([c]);
-        } else {
-            out = out + "%" + byte_substr("0123456789ABCDEF", (c / 16) - ((c / 16) % 1), ((c / 16) - ((c / 16) % 1)) + 1);
-            out = out + byte_substr("0123456789ABCDEF", (c % 16) - 0, ((c % 16) - 0) + 1);
-        }
-        i = i + 1;
-    }
-    return out;
-}
-
-fn build_query(params) {
-    let parts = [];
-    for k in keys(params) {
-        push(parts, url_encode(k) + "=" + url_encode(str(params[k])));
-    }
-    return join(parts, "&");
-}
-
-fn http_get_with_query(base, params) {
-    return http_get(base + "?" + build_query(params));
-}
-
 fn read_until(client, delim, max_bytes) {
     let buf = "";
     while len(buf) < max_bytes {
@@ -72,12 +29,11 @@ fn get_path(raw_req) {
 }
 
 fn mime_for(path) {
-    if ends_with(path, ".css") { return "text/css"; }
-    if ends_with(path, ".js")  { return "text/javascript"; }
-    if ends_with(path, ".png") { return "image/png"; }
-    if ends_with(path, ".jpg") { return "image/jpeg"; }
-    if ends_with(path, ".jpeg"){ return "image/jpeg"; }
-    if ends_with(path, ".svg") { return "image/svg+xml"; }
-    if ends_with(path, ".ico") { return "image/x-icon"; }
-    return "text/html"; // default
+    if contains(path, ".css") { return "text/css"; }
+    if contains(path, ".js")  { return "text/javascript"; }
+    if contains(path, ".png") { return "image/png"; }
+    if contains(path, ".jpg") { return "image/jpeg"; }
+    if contains(path, ".svg") { return "image/svg+xml"; }
+    if contains(path, ".ico") { return "image/x-icon"; }
+    return "text/html";
 }

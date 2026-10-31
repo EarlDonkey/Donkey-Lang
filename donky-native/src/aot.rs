@@ -30,6 +30,7 @@ pub struct RuntimeFuncs {
     pub total_mem_id: FuncId, pub used_mem_id: FuncId, pub get_processes_id: FuncId,
     pub tcp_listen_id: FuncId, pub tcp_accept_id: FuncId,
     pub tcp_read_id: FuncId, pub tcp_write_id: FuncId, pub tcp_close_id: FuncId,
+    pub http_get_id: FuncId,
 }
 
 pub struct AotCompiler {
@@ -116,18 +117,55 @@ impl AotCompiler {
             tcp_read_id:   declare("donky_tcp_read",   &[types::I64, types::I64], Some(types::I64)),
             tcp_write_id:  declare("donky_tcp_write",  &[types::I64, types::I64], Some(types::I64)),
             tcp_close_id:  declare("donky_tcp_close",  &[types::I64], Some(types::I64)),
+            http_get_id: declare("donky_http_get", &[types::I64], Some(types::I64)),
         };
         
         AotCompiler { builder_context: FunctionBuilderContext::new(), ctx: codegen::Context::new(), module, user_functions: HashMap::new(), runtime }
     }
 
     pub fn compile_to_object(mut self, stmts: &[Stmt], output_path: &str) -> Result<(), String> {
-        let mut latest_funcs: HashMap<String, (Vec<String>, Box<Stmt>)> = HashMap::new();
-        for stmt in stmts {
-            if let Stmt::Function(name, params, body) = stmt {
-                latest_funcs.insert(name.clone(), (params.clone(), body.clone()));
+        // --- NEW: Recursive Import Resolution ---
+        use std::path::Path;
+        use std::fs;
+        
+        fn resolve_imports(stmts: &[Stmt], base_dir: &str, all_funcs: &mut HashMap<String, (Vec<String>, Box<Stmt>)>) {
+            use std::path::Path;
+            use std::fs;
+            for stmt in stmts {
+                match stmt {
+                    Stmt::Import(path) => {
+                        let full_path = Path::new(base_dir).join(path).to_string_lossy().to_string();
+                        
+                        let source = match fs::read_to_string(&full_path) {
+                            Ok(s) => s,
+                            Err(e) => { println!("DEBUG: Failed to read file: {}", e); continue; }
+                        };
+                        
+                        let toks = match crate::lexer::Lexer::new(&source).tokenize() {
+                            Ok(t) => t,
+                            Err(e) => { println!("DEBUG: Lex error in {}: {}", full_path, e); continue; }
+                        };
+                        
+                        let imported_stmts = match crate::parser::Parser::new(toks).parse() {
+                            Ok(a) => a,
+                            Err(e) => { println!("DEBUG: Parse error in {}: {}", full_path, e); continue; }
+                        };
+
+                        let new_base = Path::new(&full_path).parent().unwrap_or(Path::new("")).to_string_lossy().to_string();
+                        resolve_imports(&imported_stmts, &new_base, all_funcs);
+                    }
+                    Stmt::Function(name, params, body) => {
+                        all_funcs.insert(name.clone(), (params.clone(), body.clone()));
+                    }
+                    _ => {}
+                }
             }
         }
+
+        let mut latest_funcs: HashMap<String, (Vec<String>, Box<Stmt>)> = HashMap::new();
+        // Start resolution from the current directory
+        resolve_imports(stmts, ".", &mut latest_funcs);
+        // ----------------------------------------
 
         for (name, (params, _)) in &latest_funcs {
             let mut sig = self.module.make_signature();
@@ -756,6 +794,7 @@ impl AotCompiler {
                         "tcp_read"   => runtime.tcp_read_id,
                         "tcp_write"  => runtime.tcp_write_id,
                         "tcp_close"  => runtime.tcp_close_id,
+                        "http_get" => runtime.http_get_id,
                         _ => panic!("Unknown builtin function: {}", name),
                     };
                     let local_callee = module.declare_func_in_func(builtin_id, builder.func);

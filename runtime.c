@@ -191,6 +191,35 @@ uint64_t donky_tcp_close(uint64_t client_val) {
     return 0;
 }
 
+uint64_t donky_http_get(uint64_t url_val) {
+    if (get_tag(url_val) != TAG_STRING) return 0;
+    char* url = (char*)as_index(url_val);
+    
+    // Use Windows built-in curl to fetch the URL
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "curl -s \"%s\"", url);
+    
+    FILE* pipe = _popen(cmd, "r");
+    if (!pipe) return donky_alloc_string("");
+    
+    char buffer[4096];
+    char* result = malloc(1);
+    result[0] = 0;
+    size_t total_len = 0;
+    
+    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+        size_t len = strlen(buffer);
+        result = realloc(result, total_len + len + 1);
+        strcpy(result + total_len, buffer);
+        total_len += len;
+    }
+    
+    _pclose(pipe);
+    uint64_t res = donky_alloc_string(result);
+    free(result);
+    return res;
+}
+
 uint64_t donky_alloc_array() {
     Array* arr = malloc(sizeof(Array));
     arr->data = NULL; arr->len = 0; arr->cap = 0;
