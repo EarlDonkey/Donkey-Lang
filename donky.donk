@@ -638,13 +638,11 @@ fn compile_stmt(c, stmt) {
         
         let func_start = len(c["code"]);
         
-        // Save the parameter names
-        c["params"][stmt["name"]] = stmt["params"];
-        
         compile_stmt(c, stmt["body"]);
         emit(c, "PushNull");
         emit(c, "Return");
         
+        // Patch the jump to go to the END of the function
         c["code"][jmp_idx] = "Jump " + str(len(c["code"]));
         
         c["locals"][stmt["name"]] = func_start;
@@ -856,9 +854,13 @@ fn run_bytecode(bytecode, script_args) {
         else if op == "Pop" { pop(stack); }
         else if op == "SetLocal" { locals[arg] = pop(stack); }
         else if op == "GetLocal" { 
-            if contains(locals, arg) { push(stack, locals[arg]); }
-            else if contains(globals, arg) { push(stack, globals[arg]); }
-            else { throw "Undefined variable: " + arg; }
+            if contains(locals, arg) { 
+                push(stack, locals[arg]); 
+            } else if contains(globals, arg) { 
+                push(stack, globals[arg]); 
+            } else { 
+                throw "Undefined variable: " + arg; 
+            }
         }
         else if op == "BinOp" {
             let b = pop(stack);
@@ -870,14 +872,16 @@ fn run_bytecode(bytecode, script_args) {
             if arg == "Minus" { push(stack, -val); }
             else if arg == "Bang" { push(stack, !val); }
         }
-        else if op == "Print" { print(pop(stack)); }
+        else if op == "Print" { 
+            let val = pop(stack);
+            print(str(val)); 
+        }
         else if op == "Jump" { ip = num(arg); continue; }
         else if op == "JumpIfFalse" {
             let cond = pop(stack);
             if !cond { ip = num(arg); continue; }
         }
         else if op == "DefineFunction" {
-            // arg is "add 28 a,b"
             let raw = split(arg, " ");
             let name = raw[0];
             let addr = num(raw[1]);
@@ -893,8 +897,9 @@ fn run_bytecode(bytecode, script_args) {
             globals[name + "_params"] = params_arr;
         }
         else if op == "Call" {
-            let func_name = parts[1];
-            let arg_count = num(parts[2]);
+            let parts2 = split(arg, " ");
+            let func_name = parts2[0];
+            let arg_count = num(parts2[1]);
             if !contains(globals, func_name) {
                 let args = [];
                 let i = 0;
@@ -906,7 +911,7 @@ fn run_bytecode(bytecode, script_args) {
                 push(stack, res);
             } else {
                 let func_addr = globals[func_name];
-                
+
                 // Pop arguments
                 let args = [];
                 let i = 0;
@@ -917,17 +922,19 @@ fn run_bytecode(bytecode, script_args) {
                 let j = len(args) - 1;
                 while j >= 0 { push(real_args, args[j]); j = j - 1; }
                 
+                // Save caller frame
                 push(call_stack, { "ip": ip + 1, "locals": locals });
                 
-                // Setup new locals
-                locals = {};
+                // Setup new locals and bind args
+                let new_locals = {};
                 let p_names = globals[func_name + "_params"];
                 let k = 0;
                 while k < len(p_names) && k < len(real_args) {
-                    locals[p_names[k]] = real_args[k];
+                    new_locals[p_names[k]] = real_args[k];
                     k = k + 1;
                 }
                 
+                locals = new_locals;
                 ip = func_addr;
                 continue;
             }

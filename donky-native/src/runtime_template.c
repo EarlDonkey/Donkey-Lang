@@ -66,7 +66,10 @@ void print_value(uint64_t val) {
 }
 
 void donky_print(uint64_t val) {
-    if (get_tag(val) == TAG_STRING) {
+    if (is_number(val)) {
+        print_value(val); 
+        printf("\n"); 
+    } else if (get_tag(val) == TAG_STRING) {
         printf("%s\n", (char*)as_index(val));
     } else {
         print_value(val); 

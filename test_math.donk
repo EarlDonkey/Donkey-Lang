@@ -1,6 +1,7 @@
-fn add(a, b) {
-    return a + b;
-}
+import "lib/math.donk";
 
-let result = add(5, 7);
-print(result);
+print(abs(18));
+print(abs(-5));
+print(min(10, 5));
+print(max(10, 5));
+print(gcd(48, 18));
