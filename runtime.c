@@ -16,6 +16,8 @@
 #include <psapi.h>
 #include <tlhelp32.h>
 #include <process.h> // for _beginthreadex
+#include <inttypes.h>
+#include <setjmp.h>
 
 
 #pragma comment(lib, "ws2_32.lib")
@@ -31,6 +33,35 @@ static volatile int active_threads = 0;
 #define TAG_STRING 2ULL
 #define TAG_ARRAY 3ULL
 #define TAG_MAP 4ULL
+
+// --- Garbage Collector Structures ---
+typedef struct GCHeader {
+    struct GCHeader* next;
+    int marked;
+    size_t size;
+} GCHeader;
+
+static GCHeader* gc_head = NULL;
+static size_t gc_bytes_allocated = 0;
+static size_t gc_threshold = 1024 * 1024; // Trigger GC after 1MB of allocations
+
+void gc_collect(); // Forward declaration
+
+// The custom allocator
+void* gc_malloc(size_t size) {
+    GCHeader* header = (GCHeader*)malloc(sizeof(GCHeader) + size);
+    if (!header) { printf("OOM!\n"); exit(1); }
+    
+    header->next = gc_head;
+    header->marked = 0;
+    header->size = size;
+    gc_head = header;
+    
+    gc_bytes_allocated += size;
+    
+    return (void*)(header + 1); // Return pointer AFTER the header
+}
+
 
 typedef struct { uint64_t* data; size_t len; size_t cap; } Array;
 typedef struct { uint64_t* keys; uint64_t* vals; size_t len; size_t cap; } Map;
@@ -100,7 +131,7 @@ void donky_throw(uint64_t val) { current_exception = val; }
 
 uint64_t donky_alloc_string(const char* s) {
     size_t len = strlen(s);
-    char* copy = malloc(len + 1);
+    char* copy = gc_malloc(len + 1);
     memcpy(copy, s, len + 1);
     return TAG_BASE | (TAG_STRING << 48) | (uint64_t)copy;
 }
@@ -225,7 +256,7 @@ uint64_t donky_http_get(uint64_t url_val) {
 }
 
 uint64_t donky_alloc_array() {
-    Array* arr = malloc(sizeof(Array));
+    Array* arr = gc_malloc(sizeof(Array));
     arr->data = NULL; arr->len = 0; arr->cap = 0;
     return TAG_BASE | (TAG_ARRAY << 48) | (uint64_t)arr;
 }
@@ -241,9 +272,60 @@ uint64_t donky_array_push(uint64_t arr_val, uint64_t val) {
 }
 
 uint64_t donky_alloc_map() {
-    Map* map = malloc(sizeof(Map));
+    Map* map = gc_malloc(sizeof(Map));
     map->keys = NULL; map->vals = NULL; map->len = 0; map->cap = 0;
     return TAG_BASE | (TAG_MAP << 48) | (uint64_t)map;
+}
+
+// --- Mark and Sweep ---
+void gc_mark(uint64_t val) {
+    if (is_number(val)) return; 
+    
+    uint64_t tag = get_tag(val);
+    void* ptr = (void*)as_index(val);
+    
+    if (tag != TAG_STRING && tag != TAG_ARRAY && tag != TAG_MAP) return;
+    
+    GCHeader* header = ((GCHeader*)ptr) - 1;
+    
+    if (header->marked) return; 
+    header->marked = 1;
+    
+    if (tag == TAG_ARRAY) {
+        Array* arr = (Array*)ptr;
+        for (size_t i = 0; i < arr->len; i++) {
+            gc_mark(arr->data[i]);
+        }
+    } else if (tag == TAG_MAP) {
+        Map* map = (Map*)ptr;
+        for (size_t i = 0; i < map->len; i++) {
+            gc_mark(map->keys[i]);
+            gc_mark(map->vals[i]);
+        }
+    }
+}
+
+void gc_sweep() {
+    GCHeader* curr = gc_head;
+    GCHeader* prev = NULL;
+    
+    while (curr != NULL) {
+        if (curr->marked) {
+            curr->marked = 0;
+            prev = curr;
+            curr = curr->next;
+        } else {
+            GCHeader* dead = curr;
+            if (prev == NULL) {
+                gc_head = curr->next;
+                curr = gc_head;
+            } else {
+                prev->next = curr->next;
+                curr = curr->next;
+            }
+            free(dead);
+        }
+    }
 }
 
 static int map_key_eq(uint64_t a, uint64_t b) {
@@ -679,6 +761,71 @@ uint64_t donky_spawn(uint64_t func_val, uint64_t arg1) {
     }
     
     CloseHandle((HANDLE)thread_handle);
+    return make_number(0.0);
+}
+
+// --- Stack Scanning and GC Entry ---
+void gc_mark_stack() {
+    jmp_buf env;
+    setjmp(env); 
+
+    // Get the current stack bounds using Windows API
+    ULONG_PTR lowLimit = 0, highLimit = 0;
+    GetCurrentThreadStackLimits(&lowLimit, &highLimit);
+
+    uintptr_t* stack_ptr = (uintptr_t*)&lowLimit; // Get a rough pointer to the current stack
+    uintptr_t* top = (uintptr_t*)highLimit;
+
+    // Scan the raw stack memory 8 bytes at a time
+    while (stack_ptr < top) {
+        uint64_t val = *stack_ptr;
+        
+        // Does this look like a tagged Donky pointer?
+        if ((val & TAG_MASK) == TAG_BASE) {
+            uint64_t tag = get_tag(val);
+            if (tag == TAG_STRING || tag == TAG_ARRAY || tag == TAG_MAP) {
+                // To be safe, we only mark it if it's actually inside our heap
+                // (We can add a check here later, but for now we just trust the tag)
+                gc_mark(val);
+            }
+        }
+        stack_ptr++;
+    }
+}
+
+void gc_collect() {
+    // Reset the allocation counter
+    size_t before_bytes = 0;
+    for (GCHeader* h = gc_head; h != NULL; h = h->next) {
+        before_bytes += h->size;
+    }
+    printf("[GC] Before: %zu bytes | ", before_bytes);
+    gc_bytes_allocated = 0; 
+
+    // 1. Mark globals
+    extern uint64_t donky_args_array;
+    if (donky_args_array != 0) gc_mark(donky_args_array);
+    
+    extern uint64_t current_exception;
+    if (current_exception != 0) gc_mark(current_exception);
+    
+    // 2. Scan the stack
+    gc_mark_stack();
+    
+    // 3. Sweep
+    gc_sweep();
+
+    size_t after_bytes = 0;
+    size_t live_count = 0;
+    for (GCHeader* h = gc_head; h != NULL; h = h->next) {
+        after_bytes += h->size;
+        live_count++;
+    }
+    printf("[GC] After sweep: %zu bytes | Live objects: %zu\n", after_bytes, live_count);
+}
+
+uint64_t donky_gc() {
+    gc_collect();
     return make_number(0.0);
 }
 

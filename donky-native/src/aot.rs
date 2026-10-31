@@ -30,9 +30,7 @@ pub struct RuntimeFuncs {
     pub total_mem_id: FuncId, pub used_mem_id: FuncId, pub get_processes_id: FuncId,
     pub tcp_listen_id: FuncId, pub tcp_accept_id: FuncId,
     pub tcp_read_id: FuncId, pub tcp_write_id: FuncId, pub tcp_close_id: FuncId,
-    pub http_get_id: FuncId,
-    pub mod_id: FuncId,
-    pub spawn_id: FuncId,
+    pub http_get_id: FuncId, pub mod_id: FuncId, pub spawn_id: FuncId, pub gc_id: FuncId,
 }
 
 pub struct AotCompiler {
@@ -122,6 +120,7 @@ impl AotCompiler {
             http_get_id: declare("donky_http_get", &[types::I64], Some(types::I64)),
             mod_id: declare("donky_mod", &[types::I64, types::I64], Some(types::I64)),
             spawn_id: declare("donky_spawn", &[types::I64, types::I64], Some(types::I64)),
+            gc_id: declare("donky_gc", &[], Some(types::I64)),
         };
         
         AotCompiler { builder_context: FunctionBuilderContext::new(), ctx: codegen::Context::new(), module, user_functions: HashMap::new(), runtime }
@@ -805,6 +804,7 @@ impl AotCompiler {
                         "tcp_close"  => runtime.tcp_close_id,
                         "http_get" => runtime.http_get_id,
                         "spawn" => runtime.spawn_id,
+                        "gc" => runtime.gc_id,
                         _ => panic!("Unknown builtin function: {}", name),
                     };
                     let local_callee = module.declare_func_in_func(builtin_id, builder.func);

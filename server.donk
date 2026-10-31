@@ -32,7 +32,7 @@ let server = tcp_listen(port);
 print("Concurrent server running on http://localhost:${port} ...");
 
 while true {
+    gc(); // Safe point: collect garbage before accepting a new connection
     let client = tcp_accept(server);
-    // Spawn a new OS thread for every incoming connection!
-    spawn(handle_client, client); 
+    spawn(handle_client, client);
 }

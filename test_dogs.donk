@@ -17,4 +17,4 @@ fn main() {
     print("First dog's type is: " + dogs[0]["__type__"]);
 }
 
-main();
+main()
