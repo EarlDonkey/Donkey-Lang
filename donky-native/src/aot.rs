@@ -31,6 +31,8 @@ pub struct RuntimeFuncs {
     pub tcp_listen_id: FuncId, pub tcp_accept_id: FuncId,
     pub tcp_read_id: FuncId, pub tcp_write_id: FuncId, pub tcp_close_id: FuncId,
     pub http_get_id: FuncId,
+    pub mod_id: FuncId,
+    pub spawn_id: FuncId,
 }
 
 pub struct AotCompiler {
@@ -118,6 +120,8 @@ impl AotCompiler {
             tcp_write_id:  declare("donky_tcp_write",  &[types::I64, types::I64], Some(types::I64)),
             tcp_close_id:  declare("donky_tcp_close",  &[types::I64], Some(types::I64)),
             http_get_id: declare("donky_http_get", &[types::I64], Some(types::I64)),
+            mod_id: declare("donky_mod", &[types::I64, types::I64], Some(types::I64)),
+            spawn_id: declare("donky_spawn", &[types::I64, types::I64], Some(types::I64)),
         };
         
         AotCompiler { builder_context: FunctionBuilderContext::new(), ctx: codegen::Context::new(), module, user_functions: HashMap::new(), runtime }
@@ -705,6 +709,11 @@ impl AotCompiler {
                 // can continue and throw a proper runtime error if needed.
                 if let Some(var) = fctx.variables.get(name) {
                     builder.use_var(*var)
+                } else if let Some(func_id) = user_funcs.get(name) {
+                    // NEW: If it's a function name, return its memory address
+                    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+                    let addr = builder.ins().func_addr(types::I64, func_ref);
+                    addr 
                 } else {
                     builder.ins().iconst(types::I64, 0) // Return null
                 }
@@ -795,6 +804,7 @@ impl AotCompiler {
                         "tcp_write"  => runtime.tcp_write_id,
                         "tcp_close"  => runtime.tcp_close_id,
                         "http_get" => runtime.http_get_id,
+                        "spawn" => runtime.spawn_id,
                         _ => panic!("Unknown builtin function: {}", name),
                     };
                     let local_callee = module.declare_func_in_func(builtin_id, builder.func);
@@ -802,7 +812,47 @@ impl AotCompiler {
                     for arg in args { arg_vals.push(Self::compile_expr(builder, module, runtime, user_funcs, fctx, arg)); }
                     let call = builder.ins().call(local_callee, &arg_vals);
                     let results = builder.inst_results(call);
-                    if results.is_empty() { builder.ins().iconst(types::I64, 0) } else { results[0] }
+                    let ret_val = if results.is_empty() { builder.ins().iconst(types::I64, 0) } else { results[0] };
+
+                    // --- NEW: Check for exceptions thrown by builtins ---
+                    let has_exc_func = module.declare_func_in_func(runtime.has_exception_id, builder.func);
+                    let exc_call = builder.ins().call(has_exc_func, &[]);
+                    let has_exc = builder.inst_results(exc_call)[0];
+                    let zero_i32 = builder.ins().iconst(types::I32, 0);
+                    let cmp = builder.ins().icmp(IntCC::NotEqual, has_exc, zero_i32);
+                    
+                    let cont_block = builder.create_block();
+                    let exc_block = builder.create_block();
+                    let vars = Self::get_sorted_vars(fctx);
+                    for _ in 0..vars.len() {
+                        builder.append_block_param(exc_block, types::I64);
+                        builder.append_block_param(cont_block, types::I64);
+                    }
+                    
+                    let args_vals: Vec<Value> = vars.iter().map(|v| builder.use_var(*v)).collect();
+                    builder.ins().brif(cmp, exc_block, &args_vals, cont_block, &args_vals);
+                    builder.seal_block(exc_block);
+                    builder.seal_block(cont_block);
+                    
+                    builder.switch_to_block(exc_block);
+                    let exc_params = builder.block_params(exc_block).to_vec();
+                    for (i, var) in vars.iter().enumerate() {
+                        builder.def_var(*var, exc_params[i]);
+                    }
+                    if let Some((target, tvars)) = &fctx.exception_target {
+                        let targs: Vec<Value> = tvars.iter().map(|v| builder.use_var(*v)).collect();
+                        builder.ins().jump(*target, &targs);
+                    } else {
+                        let zero_val = builder.ins().iconst(types::I64, 0);
+                        builder.ins().return_(&[zero_val]);
+                    }
+                    
+                    builder.switch_to_block(cont_block);
+                    let cont_params = builder.block_params(cont_block).to_vec();
+                    for (i, var) in vars.iter().enumerate() {
+                        builder.def_var(*var, cont_params[i]);
+                    }
+                    ret_val
                 }
             }
             Expr::Array(elements) => {
@@ -902,6 +952,11 @@ impl AotCompiler {
                             let b = builder.ins().bitcast(types::F64, MemFlags::new(), rhs); 
                             let res = builder.ins().fdiv(a, b);
                             builder.ins().bitcast(types::I64, MemFlags::new(), res) 
+                        }
+                        TokenType::Percent => {
+                            let mod_func = module.declare_func_in_func(runtime.mod_id, builder.func);
+                            let call = builder.ins().call(mod_func, &[lhs, rhs]);
+                            builder.inst_results(call)[0]
                         }
                         TokenType::And => {
                             let truthy_func = module.declare_func_in_func(runtime.truthy_id, builder.func);

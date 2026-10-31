@@ -1,0 +1,7 @@
+try {
+    let f = read_file("doesnotexist.txt");
+    print("Found file!");
+} catch e {
+    print("Caught: " + str(e));
+}
+print("After try/catch");

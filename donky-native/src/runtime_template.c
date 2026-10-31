@@ -15,11 +15,15 @@
 #include <windows.h>
 #include <psapi.h>
 #include <tlhelp32.h>
+#include <process.h> // for _beginthreadex
+
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "psapi.lib")
 
 static int rand_seeded = 0;
+
+static volatile int active_threads = 0;
 
 #define TAG_MASK 0xFFF8000000000000ULL
 #define TAG_BASE 0x7FF8000000000000ULL
@@ -310,6 +314,15 @@ uint64_t donky_add(uint64_t a, uint64_t b) {
     return 0;
 }
 
+uint64_t donky_mod(uint64_t a, uint64_t b) {
+    if (is_number(a) && is_number(b)) {
+        double db = as_number(b);
+        if (db == 0.0) return make_number(0.0); // Avoid divide by zero crash
+        return make_number(fmod(as_number(a), db));
+    }
+    return make_number(0.0);
+}
+
 uint64_t donky_byte_at(uint64_t s_val, uint64_t i_val) {
     if (get_tag(s_val) == TAG_STRING && is_number(i_val)) {
         char* s = (char*)as_index(s_val);
@@ -383,8 +396,21 @@ uint64_t donky_num(uint64_t val) {
 
 uint64_t donky_read_file(uint64_t path_val) {
     if (get_tag(path_val) != TAG_STRING) return 0;
-    FILE* f = fopen((char*)as_index(path_val), "rb");
-    if (!f) return 0;
+    char* path = (char*)as_index(path_val);
+    FILE* f = fopen(path, "rb");
+    
+    if (!f) {
+        // Build the error message
+        char err_buf[512];
+        snprintf(err_buf, sizeof(err_buf), "File not found: %s", path);
+        
+        // Throw the exception using the existing runtime function!
+        extern void donky_throw(uint64_t val);
+        donky_throw(donky_alloc_string(err_buf));
+        
+        return 0; // Return null, but the exception is now flagged
+    }
+    
     fseek(f, 0, SEEK_END); long len = ftell(f); fseek(f, 0, SEEK_SET);
     char* buf = malloc(len + 1); fread(buf, 1, len, f); buf[len] = 0; fclose(f);
     uint64_t res = donky_alloc_string(buf); free(buf); return res;
@@ -611,10 +637,56 @@ void donky_set_args(int argc, char** argv) {
 }
 uint64_t donky_get_args() { return donky_args_array; }
 
+typedef struct {
+    uint64_t func_ptr;
+    uint64_t arg1;
+} ThreadArgs;
+
+unsigned __stdcall donky_thread_runner(void* raw_args) {
+    ThreadArgs* args = (ThreadArgs*)raw_args;
+    
+    uintptr_t fp = (uintptr_t)args->func_ptr;
+    uint64_t a1 = args->arg1;
+    
+    // Cast to a function that takes one uint64_t
+    typedef uint64_t (*DonkyFn)(uint64_t);
+    DonkyFn fn = (DonkyFn)fp;
+    
+    fn(a1); 
+    
+    free(args);
+    active_threads--;
+    return 0;
+}
+
+uint64_t donky_spawn(uint64_t func_val, uint64_t arg1) {
+    ThreadArgs* args = malloc(sizeof(ThreadArgs));
+    args->func_ptr = func_val;
+    args->arg1 = arg1;
+    
+    active_threads++;
+    uintptr_t thread_handle = _beginthreadex(NULL, 0, donky_thread_runner, args, 0, NULL);
+    
+    if (thread_handle == 0) {
+        active_threads--;
+        free(args);
+        return make_number(-1.0);
+    }
+    
+    CloseHandle((HANDLE)thread_handle);
+    return make_number(0.0);
+}
+
 int main(int argc, char** argv) {
     donky_set_args(argc, argv);
     extern int64_t donky_toplevel();
     donky_toplevel();
+    
+    // Wait for spawned threads to finish
+    while (active_threads > 0) {
+        Sleep(10);
+    }
+    
     if (current_exception != 0) { printf("Uncaught exception: "); print_value(current_exception); printf("\n"); return 1; }
     return 0;
 }

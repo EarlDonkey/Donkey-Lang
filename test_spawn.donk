@@ -1,0 +1,12 @@
+fn background_task() {
+    print("Background thread started!");
+    let i = 0;
+    while i < 10000000 {
+        i = i + 1;
+    }
+    print("Background thread finished!");
+}
+
+print("Main thread starting...");
+spawn(background_task);
+print("Main thread ending!");

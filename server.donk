@@ -1,26 +1,20 @@
 import "lib/http.donk";
 
-// --- Server ---
-let port = 8080;
-let server = tcp_listen(port);
-print("Server running on http://localhost:${port} ...");
-
-while true {
-    let client = tcp_accept(server);
+fn handle_client(client) {
     let raw_req = read_until(client, "\r\n\r\n", 8192);
-    
     let path = get_path(raw_req);
-    let full_path = "examples/public" + path;
+    let full_path = "examples/public" + path; // Note: fix this path to your actual folder!
     
-    // Now it actually uses the path!
-    let body = read_file(full_path);
+    let body = "";
     let status = "200 OK";
     let mime = mime_for(path);
     
-    if len(body) == 0 {
+    try {
+        body = read_file(full_path);
+    } catch e {
         status = "404 Not Found";
         mime = "text/plain";
-        body = "Not Found";
+        body = "Donky says: " + str(e);
     }
     
     let response = "HTTP/1.1 ${status}\r\n" +
@@ -31,4 +25,14 @@ while true {
 
     tcp_write(client, response);
     tcp_close(client);
+}
+
+let port = 8080;
+let server = tcp_listen(port);
+print("Concurrent server running on http://localhost:${port} ...");
+
+while true {
+    let client = tcp_accept(server);
+    // Spawn a new OS thread for every incoming connection!
+    spawn(handle_client, client); 
 }
