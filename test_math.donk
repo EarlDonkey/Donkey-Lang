@@ -1,7 +1,0 @@
-import "lib/math.donk";
-
-print(abs(18));
-print(abs(-5));
-print(min(10, 5));
-print(max(10, 5));
-print(gcd(48, 18));

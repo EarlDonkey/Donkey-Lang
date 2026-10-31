@@ -1,4 +1,0 @@
-// Donky example program
-let x = 10;
-let y = x * 2 + 3;
-print(y);

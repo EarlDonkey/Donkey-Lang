@@ -6,6 +6,12 @@
 #include <time.h>
 #include <math.h>
 #include <conio.h>
+
+#define WIN32_LEAN_AND_MEAN
+#define _WINSOCKAPI_
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <psapi.h>
 #include <tlhelp32.h>
@@ -66,7 +72,10 @@ void print_value(uint64_t val) {
 }
 
 void donky_print(uint64_t val) {
-    if (get_tag(val) == TAG_STRING) {
+    if (is_number(val)) {
+        print_value(val); 
+        printf("\n"); 
+    } else if (get_tag(val) == TAG_STRING) {
         printf("%s\n", (char*)as_index(val));
     } else {
         print_value(val); 
@@ -86,8 +95,100 @@ void donky_clear_exception() { current_exception = 0; }
 void donky_throw(uint64_t val) { current_exception = val; }
 
 uint64_t donky_alloc_string(const char* s) {
-    char* copy = strdup(s);
+    size_t len = strlen(s);
+    char* copy = malloc(len + 1);
+    memcpy(copy, s, len + 1);
     return TAG_BASE | (TAG_STRING << 48) | (uint64_t)copy;
+}
+
+
+// --- TCP (static socket table; box an int id into Donky) ---
+#define DK_MAX_SOCK 64
+static SOCKET g_socks[DK_MAX_SOCK];
+static int g_socks_init = 0;
+
+static int dk_id_from_socket(SOCKET s) {
+    for (int i = 0; i < DK_MAX_SOCK; i++) {
+        if (g_socks[i] == 0) { g_socks[i] = s; return i + 1; }
+    }
+    return 0;
+}
+static SOCKET dk_socket_from_id(uint64_t v) {
+    int id = (int)as_number(v);
+    if (id <= 0 || id > DK_MAX_SOCK) return INVALID_SOCKET;
+    return g_socks[id - 1];
+}
+static void dk_ws_init(void) {
+    if (g_socks_init) return;
+    WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
+    for (int i = 0; i < DK_MAX_SOCK; i++) g_socks[i] = 0;
+    g_socks_init = 1;
+}
+
+uint64_t donky_tcp_listen(uint64_t port_val) {
+    dk_ws_init();
+    int port = (int)as_number(port_val);
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) return make_number(-1.0);
+
+    // SO_REUSEADDR so restarts don't fail with "address in use"
+    int yes = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&yes, sizeof(yes));
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons((u_short)port);
+
+    if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) { closesocket(s); return make_number(-1.0); }
+    if (listen(s, SOMAXCONN) == SOCKET_ERROR) { closesocket(s); return make_number(-1.0); }
+    return make_number((double)dk_id_from_socket(s));
+}
+
+uint64_t donky_tcp_accept(uint64_t server_val) {
+    dk_ws_init();
+    SOCKET srv = dk_socket_from_id(server_val);
+    if (srv == INVALID_SOCKET) return make_number(-1.0);
+    SOCKET c = accept(srv, NULL, NULL);
+    if (c == INVALID_SOCKET) return make_number(-1.0);
+    return make_number((double)dk_id_from_socket(c));
+}
+
+uint64_t donky_tcp_read(uint64_t client_val, uint64_t max_val) {
+    SOCKET c = dk_socket_from_id(client_val);
+    if (c == INVALID_SOCKET) return donky_alloc_string("");
+    int max = (int)as_number(max_val);
+    if (max <= 0 || max > 65536) max = 4096;
+    char* buf = malloc(max + 1);
+    int n = recv(c, buf, max, 0);
+    if (n <= 0) { free(buf); return donky_alloc_string(""); }
+    buf[n] = 0;
+    uint64_t res = donky_alloc_string(buf);
+    free(buf);
+    return res;
+}
+
+uint64_t donky_tcp_write(uint64_t client_val, uint64_t data_val) {
+    SOCKET c = dk_socket_from_id(client_val);
+    if (c == INVALID_SOCKET || get_tag(data_val) != TAG_STRING) return make_number(-1.0);
+    char* data = (char*)as_index(data_val);
+    int total = 0, len = (int)strlen(data);
+    while (total < len) {
+        int n = send(c, data + total, len - total, 0);
+        if (n <= 0) return make_number(-1.0);
+        total += n;
+    }
+    return make_number((double)total);
+}
+
+uint64_t donky_tcp_close(uint64_t client_val) {
+    int id = (int)as_number(client_val);
+    if (id > 0 && id <= DK_MAX_SOCK && g_socks[id - 1] != 0) {
+        closesocket(g_socks[id - 1]);
+        g_socks[id - 1] = 0;
+    }
+    return 0;
 }
 
 uint64_t donky_alloc_array() {

@@ -1,9 +1,0 @@
-let fruits = ["apple", "banana", "cherry"];
-let greeting = "I have ";
-
-for fruit in fruits {
-    print("Fruit: " + fruit);
-    greeting = greeting + fruit + " ";
-}
-
-print(greeting);

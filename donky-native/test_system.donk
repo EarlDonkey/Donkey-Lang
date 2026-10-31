@@ -1,4 +1,0 @@
-let out = system("echo hello from system");
-print(out);
-let out2 = system("dir /b");
-print(out2);

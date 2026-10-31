@@ -1,9 +1,0 @@
-let x = 10;
-let y = 20;
-print(x + y);
-
-fn sq(n) {
-    return n * n;
-}
-
-print(sq(7));

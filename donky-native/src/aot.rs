@@ -28,6 +28,8 @@ pub struct RuntimeFuncs {
     pub cls_id: FuncId, pub getch_id: FuncId, pub kbhit_id: FuncId,
     pub input_id: FuncId, pub sleep_id: FuncId,
     pub total_mem_id: FuncId, pub used_mem_id: FuncId, pub get_processes_id: FuncId,
+    pub tcp_listen_id: FuncId, pub tcp_accept_id: FuncId,
+    pub tcp_read_id: FuncId, pub tcp_write_id: FuncId, pub tcp_close_id: FuncId,
 }
 
 pub struct AotCompiler {
@@ -109,6 +111,11 @@ impl AotCompiler {
             total_mem_id: declare("donky_get_total_mem", &[], Some(types::I64)),
             used_mem_id: declare("donky_get_used_mem", &[], Some(types::I64)),
             get_processes_id: declare("donky_get_processes", &[], Some(types::I64)),
+            tcp_listen_id: declare("donky_tcp_listen", &[types::I64], Some(types::I64)),
+            tcp_accept_id: declare("donky_tcp_accept", &[types::I64], Some(types::I64)),
+            tcp_read_id:   declare("donky_tcp_read",   &[types::I64, types::I64], Some(types::I64)),
+            tcp_write_id:  declare("donky_tcp_write",  &[types::I64, types::I64], Some(types::I64)),
+            tcp_close_id:  declare("donky_tcp_close",  &[types::I64], Some(types::I64)),
         };
         
         AotCompiler { builder_context: FunctionBuilderContext::new(), ctx: codegen::Context::new(), module, user_functions: HashMap::new(), runtime }
@@ -744,6 +751,11 @@ impl AotCompiler {
                         "input" => runtime.input_id, "sleep" => runtime.sleep_id,
                         "total_mem" => runtime.total_mem_id, "used_mem" => runtime.used_mem_id,
                         "get_processes" => runtime.get_processes_id,
+                        "tcp_listen" => runtime.tcp_listen_id,
+                        "tcp_accept" => runtime.tcp_accept_id,
+                        "tcp_read"   => runtime.tcp_read_id,
+                        "tcp_write"  => runtime.tcp_write_id,
+                        "tcp_close"  => runtime.tcp_close_id,
                         _ => panic!("Unknown builtin function: {}", name),
                     };
                     let local_callee = module.declare_func_in_func(builtin_id, builder.func);
@@ -887,6 +899,27 @@ impl AotCompiler {
                         _ => panic!("Unsupported binary op"),
                     }
                 }
+            }
+            Expr::InterpolatedString(parts) => {
+                if parts.is_empty() {
+                    return Self::compile_expr(builder, module, runtime, user_funcs, fctx, &Expr::String("".into()));
+                }
+                let mut acc = Self::compile_expr(builder, module, runtime, user_funcs, fctx, &parts[0]);
+                let str_func = module.declare_func_in_func(runtime.str_id, builder.func);
+                let add_func = module.declare_func_in_func(runtime.add_id, builder.func);
+                
+                // Convert initial part to string
+                let acc_str_call = builder.ins().call(str_func, &[acc]);
+                acc = builder.inst_results(acc_str_call)[0];
+
+                for part in &parts[1..] {
+                    let p_val = Self::compile_expr(builder, module, runtime, user_funcs, fctx, part);
+                    let p_str_call = builder.ins().call(str_func, &[p_val]);
+                    let p_str = builder.inst_results(p_str_call)[0];
+                    let add_call = builder.ins().call(add_func, &[acc, p_str]);
+                    acc = builder.inst_results(add_call)[0];
+                }
+                acc
             }
             _ => panic!("Unsupported expression in native codegen"),
         }
